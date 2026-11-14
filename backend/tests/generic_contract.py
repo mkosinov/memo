@@ -389,12 +389,13 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
             "title": "T",
             "description": "D",
             "image_url": "http://x",
-            "specialty": "s",
             "min_age": 6,
             "duration": 60,
             "record_info": "ri",
         },
-        fk_map={},
+        # GH #599: the direction reference — one dictionary row per test
+        # via the conftest factory (fk_map fills ``specialty_id``).
+        fk_map={"specialty_id": "create_specialty"},
         not_null_field="title",
         not_null_sentinel="T2",
         nullable_field="max_age",
@@ -405,7 +406,6 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
             "title": "T2",
             "description": "D2",
             "image_url": "http://x2",
-            "specialty": "s2",
             "min_age": 7,
             "duration": 90,
             "record_info": "ri2",

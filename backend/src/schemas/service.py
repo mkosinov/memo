@@ -134,10 +134,14 @@ class ServiceMaterialLinkIn(BaseModel):
 
 
 class ServiceBase(BaseModel):
+    # GH #599 §4.3: the direction is a dictionary REFERENCE — the input
+    # shape carries the id (unknown id → 422 prevalidation in the
+    # service layer, the materials #223 pattern); the DISPLAY title
+    # string returns as the read-only ``ServiceResponse.specialty``.
+    specialty_id: UUID
     title: str
     description: str
     image_url: str
-    specialty: str
     min_age: int
     max_age: int | None = None
     duration: int
@@ -193,10 +197,10 @@ class ServicePatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    specialty_id: UUID | None = None
     title: str | None = None
     description: str | None = None
     image_url: str | None = None
-    specialty: str | None = None
     min_age: int | None = None
     max_age: int | None = None
     duration: int | None = None
@@ -208,6 +212,22 @@ class ServicePatch(BaseModel):
     @model_validator(mode="after")
     def _tariff_ids_unique(self) -> Self:
         _check_tariff_ids_unique(self.tariffs)
+        return self
+
+    @model_validator(mode="after")
+    def _specialty_id_never_null(self) -> Self:
+        """GH #599 §4.3: EXPLICIT ``null`` → 422 (обнуление невозможно —
+        NOT NULL FK). Absent → preserve the current direction; a sent
+        valid id moves the service. Unlike the other NOT NULL scalars
+        (silently stripped by the service layer) the rejection is
+        explicit — the client must not think a blanked direction was
+        applied. ``model_fields_set`` separates the absent field from
+        the explicit null."""
+        if "specialty_id" in self.model_fields_set and self.specialty_id is None:
+            raise ValueError(
+                "specialty_id: null is not allowed — the direction is required; "
+                "omit the field to keep the current one"
+            )
         return self
 
 
@@ -241,12 +261,18 @@ class ServiceResponse(ServiceBase):
     ``is_active`` stays as the DB/ORM column but is ``exclude=True`` so it never
     serializes to JSON. The API exposes ``archived`` (inverted: ``archived = not
     is_active``, ``archived = true`` = in archive) via a computed field (#207 §3.1).
+
+    GH #599 §4.3: ``specialty: str`` is the read-only DISPLAY string —
+    the linked dictionary title (the ORM ``Service.specialty`` property
+    over the eagerly-loaded relationship); ``specialty_id`` (inherited
+    from ``ServiceBase``) carries the reference itself.
     """
 
     model_config = ConfigDict(from_attributes=True)
     id: str
     created_at: datetime
     updated_at: datetime
+    specialty: str
     is_active: bool = Field(..., exclude=True)
     tariffs: list[TariffResponse] = []
     tags: list[TagResponse] = []

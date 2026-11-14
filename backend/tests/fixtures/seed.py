@@ -46,6 +46,26 @@ class SeedLoader:
     def __init__(self, client: TestClient) -> None:
         self.client = client
         self._cache: dict[str, list[dict]] = {}
+        self._specialty_ids: dict[str, str] = {}
+
+    def _specialty_id(self, title: str) -> str:
+        """Resolve a direction title → dictionary row id (GH #599).
+
+        Case-insensitive lookup over ``/specialties/all``; creates the
+        row on first sight. Service payloads carry the title in their
+        ``specialty`` key — the loader swaps it for the reference.
+        """
+        key = title.lower()
+        if key not in self._specialty_ids:
+            listed = self.client.get("/api/v1/specialties/all")
+            assert listed.status_code == 200, listed.text
+            for row in listed.json():
+                self._specialty_ids.setdefault(row["title"].lower(), row["id"])
+        if key not in self._specialty_ids:
+            created = self.client.post("/api/v1/specialties", json={"title": title})
+            assert created.status_code == 201, created.text
+            self._specialty_ids[key] = created.json()["id"]
+        return self._specialty_ids[key]
 
     def load_masters(self) -> list[dict]:
         """Create masters from fixtures/masters.json."""
@@ -60,11 +80,18 @@ class SeedLoader:
         return self._cache["masters"]
 
     def load_services(self) -> list[dict]:
-        """Create services from fixtures/services.json (with tariffs)."""
+        """Create services from fixtures/services.json (with tariffs).
+
+        GH #599: the fixture's ``specialty`` title is resolved into a
+        dictionary ``specialty_id`` before the POST.
+        """
         if "services" not in self._cache:
             items = _load_json("services")
             created = []
             for item in items:
+                title = item.pop("specialty", None)
+                if title is not None:
+                    item["specialty_id"] = self._specialty_id(title)
                 resp = self.client.post("/api/v1/services", json=item)
                 assert resp.status_code == 201, f"Seed service failed: {resp.text}"
                 created.append(resp.json())

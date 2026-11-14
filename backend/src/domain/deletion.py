@@ -87,7 +87,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import column, delete, func, select, table, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.session import Session
@@ -1014,27 +1014,18 @@ async def _count_spec_staff_specialties(s: AsyncSession, entity_id: str) -> _Cou
     return r.scalar_one(), None
 
 
-# GH #599 Task 2: lightweight core view of the R1 ``services.specialty_id``
-# column — the Service ORM model maps it only in Task 3, but the Specialty
-# counters/id-collectors must read it NOW (the column exists at the DB
-# level since R1; the tests' alembic-created schema carries it).
-_specialty_services_fk = table(
-    "services",
-    column("id"),
-    column("specialty_id"),
-)
-
-
 async def _count_spec_services(s: AsyncSession, entity_id: str) -> _CountResult:
     """Specialty → services: ALL rows pointing at the specialty via
     ``specialty_id`` — the FK RESTRICT preview. Archived rows COUNT
     (``is_active`` deliberately not filtered: archiving a service never
     frees the direction, so the preview must match what RESTRICT would
-    reject — every row)."""
+    reject — every row). Since R2 the Service ORM model maps the
+    ``specialty_id`` column (GH #599 Task 3) — no lightweight core-table
+    stand-in anymore."""
     r = await s.execute(
         select(func.count())
-        .select_from(_specialty_services_fk)
-        .where(_specialty_services_fk.c.specialty_id == entity_id)
+        .select_from(Service)
+        .where(Service.specialty_id == entity_id)
     )
     return r.scalar_one(), None
 
@@ -1775,9 +1766,7 @@ async def _ids_spec_services(s: AsyncSession, entity_id: str) -> list[str]:
     the commit ``stale_dependencies`` BEFORE the FK RESTRICT could turn
     the hard delete into an IntegrityError."""
     r = await s.execute(
-        select(_specialty_services_fk.c.id).where(
-            _specialty_services_fk.c.specialty_id == entity_id
-        )
+        select(Service.id).where(Service.specialty_id == entity_id)
     )
     return list(r.scalars().all())
 

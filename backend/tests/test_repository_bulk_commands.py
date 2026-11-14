@@ -31,6 +31,7 @@ from src.models.master import Master
 from src.models.payment import Payment
 from src.models.record import Record
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tag import Tag, client_tags, record_tags
 from src.models.visit import Visit
@@ -45,12 +46,23 @@ pytestmark = pytest.mark.asyncio
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 
 
-def _service() -> Service:
+async def _service(db_session) -> Service:
+    """GH #599: the direction is a dictionary reference — find-or-create
+    the shared «Живопись» row and link by id."""
+    spec = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if spec is None:
+        spec = Specialty(title="Живопись")
+        db_session.add(spec)
+        await db_session.flush()
     return Service(
         title="S",
         description="d",
         image_url="http://x",
-        specialty="живопись",
+        specialty_id=spec.id,
         min_age=0,
         duration=60,
         record_info="r",
@@ -69,7 +81,7 @@ async def _activity(db_session, **overrides) -> Activity:
         color="#000000",
     )
     db_session.add(master)
-    service = overrides.get("service") or _service()
+    service = overrides.get("service") or await _service(db_session)
     db_session.add(service)
     location = overrides.get("location") or _location()
     db_session.add(location)

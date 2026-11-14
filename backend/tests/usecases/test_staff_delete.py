@@ -56,6 +56,7 @@ from src.models.location import Location
 from src.models.master import Master
 from src.models.position import Position, staff_positions
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tag import Tag, master_tags
 from src.models.user import User
@@ -65,6 +66,20 @@ pytestmark = pytest.mark.asyncio
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
+
+
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
 
 
 async def _add_staff(db_session: Any, **kwargs: Any) -> Staff:
@@ -286,7 +301,8 @@ async def test_delete_blocked_by_activities_raises(db_session, subscriber) -> No
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
     service_ = Service(
-        title="S", description="d", image_url="i", specialty="живопись",
+        title="S", description="d", image_url="i",
+        specialty_id=(await _t3_spec(db_session)).id,  # GH #599
         min_age=6, duration=90, record_info="r",
     )
     location = Location(title="L", capacity=10)
@@ -326,7 +342,8 @@ async def test_delete_stale_expected_raises_before_blocking(db_session) -> None:
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
     service_ = Service(
-        title="S", description="d", image_url="i", specialty="живопись",
+        title="S", description="d", image_url="i",
+        specialty_id=(await _t3_spec(db_session)).id,  # GH #599
         min_age=6, duration=90, record_info="r",
     )
     location = Location(title="L", capacity=10)

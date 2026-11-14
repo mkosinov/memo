@@ -43,11 +43,24 @@ from src.domain.errors import UnknownSortKeyError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from sqlalchemy import Select
     from sqlalchemy.orm import InstrumentedAttribute
 
     from src.schemas.common import SortOrder
 
-__all__ = ["NullsPolicy", "SortExpr", "SortKeyMap", "SortKeySpec", "apply_sort"]
+    #: The join helper's passthrough type — any single-entity select
+    #: (``Select[tuple[Service]]`` at the call sites; the generic param
+    #: keeps the helper entity-agnostic).
+    _AnySelect = Select[tuple[Any]]
+
+__all__ = [
+    "NullsPolicy",
+    "SortExpr",
+    "SortKeyMap",
+    "SortKeySpec",
+    "apply_sort",
+    "services_specialty_join",
+]
 
 #: Type alias for SQLAlchemy order-by expression elements. Two honest
 #: arms: a plain SQL ``ColumnElement`` (labeled scalar subqueries, unary
@@ -124,3 +137,29 @@ def apply_sort(
 
     ordered.append(tie_break.asc())
     return ordered
+
+
+# ─── GH #599 R2: JOIN-carried sort keys ────────────────────────────────────────
+#
+# The services ``specialty`` key orders by ``Specialty.title`` — a column
+# of ANOTHER table, so the key needs a JOIN in the list statement (spec
+# §4.5). The join lives HERE (not as a local resolver at the entity —
+# those are banned, docs/domain-rules/_overview.md): both the sort key
+# (``api/v1/services.py``) and the eager-load statements
+# (``services/service.py``) reference this one builder, so the criterion
+# can never drift between ordering and loading.
+
+
+def services_specialty_join(stmt: _AnySelect) -> _AnySelect:
+    """LEFT OUTER JOIN ``specialties`` onto a services select (GH #599 §4.5).
+
+    Many-to-one over a NOT NULL FK — the join is 1:1 for every row, so
+    it never changes the row count or the repo COUNT. It carries BOTH
+    the ``specialty`` sort key (``ORDER BY specialties.title`` becomes
+    addressable) and the eager load of the display title — call it with
+    ``contains_eager(Service.specialty_ref)`` in the statement options.
+    """
+    from src.models.service import Service
+    from src.models.specialty import Specialty
+
+    return stmt.outerjoin(Specialty, Service.specialty_id == Specialty.id)

@@ -63,6 +63,7 @@ from src.models import (
     Record,
     Service,
     ServiceMaterial,
+    Specialty,
     Staff,
     Tag,
     Tariff,
@@ -385,34 +386,57 @@ async def _seed_locations(session: AsyncSession, ids: _SeedIds) -> None:
         session.add(location)
 
 
+# GH #599 (Task 3 interim — the fuller dictionary seed is Task 7): the
+# direction titles used by the seeded services become dictionary rows;
+# the service literals below reference them by these aliases.
+_SPECIALTY_RAW: list[tuple[str, str]] = [
+    ("живопись", "Живопись"),
+    ("керамика", "Керамика"),
+]
+
+
+async def _seed_specialties(session: AsyncSession, ids: _SeedIds) -> None:
+    """Seed the specialties dictionary (GH #599) — the service direction
+    references resolve through the alias registry."""
+    for alias, title in _SPECIALTY_RAW:
+        specialty = Specialty(id=_new_id(), title=title)
+        ids.put("specialties", alias, specialty.id)
+        session.add(specialty)
+
+
 _SERVICE_RAW: list[tuple[str, dict[str, str | int | None]]] = [
     ("s1", {"title": "Картина маслом", "description": "Масляная живопись на холсте",
-            "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
+            "image_url": "/images/card-seascape.jpg", "specialty_id": "живопись",
             "min_age": 12, "max_age": None, "duration": 150, "record_info": "",}),
     ("s2", {"title": "Картина акрилом", "description": "Акриловая живопись на холсте",
-            "image_url": "/images/card-mountain-acrylic.jpg", "specialty": "живопись",
+            "image_url": "/images/card-mountain-acrylic.jpg", "specialty_id": "живопись",
             "min_age": 6, "max_age": None, "duration": 120, "record_info": "",}),
     ("s3", {"title": "Мини-картина акрилом", "description": "Миниатюра акрилом на маленьком холсте",
-            "image_url": "/images/card-watercolor.jpg", "specialty": "живопись",
+            "image_url": "/images/card-watercolor.jpg", "specialty_id": "живопись",
             "min_age": 6, "max_age": None, "duration": 90, "record_info": "",}),
     ("s4", {"title": "Акварель", "description": "Акварельная живопись",
-            "image_url": "/images/card-watercolor.jpg", "specialty": "живопись",
+            "image_url": "/images/card-watercolor.jpg", "specialty_id": "живопись",
             "min_age": 6, "max_age": 12, "duration": 150, "record_info": "",}),
     ("s5", {"title": "Ручная лепка", "description": "Лепка из глины",
-            "image_url": "/images/card-animals.jpg", "specialty": "керамика",
+            "image_url": "/images/card-animals.jpg", "specialty_id": "керамика",
             "min_age": 5, "max_age": None, "duration": 90, "record_info": "",}),
     ("s6", {"title": "Роспись одежды", "description": "Роспись футболки или шоппера",
-            "image_url": "/images/card-shopper.jpg", "specialty": "живопись",
+            "image_url": "/images/card-shopper.jpg", "specialty_id": "живопись",
             "min_age": 8, "max_age": None, "duration": 120, "record_info": "",}),
     ("s7", {"title": "Морской пейзаж", "description": "Морской пейзаж маслом",
-            "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
+            "image_url": "/images/card-seascape.jpg", "specialty_id": "живопись",
             "min_age": 12, "max_age": None, "duration": 180, "record_info": "",}),
 ]
 
 
 async def _seed_services(session: AsyncSession, ids: _SeedIds) -> None:
     for alias, fields in _SERVICE_RAW:
-        service = Service(id=_new_id(), **fields)
+        # ``specialty_id`` holds the specialty ALIAS at the literal level
+        # (readable data); resolve it through the registry before the ORM
+        # write (GH #599).
+        resolved = dict(fields)
+        resolved["specialty_id"] = ids.get("specialties", str(fields["specialty_id"]))
+        service = Service(id=_new_id(), **resolved)
         ids.put("services", alias, service.id)
         session.add(service)
 
@@ -857,6 +881,10 @@ async def seed_data(manager: DBManager) -> None:
         await _seed_masters(session, ids)
         await session.flush()
         await _seed_locations(session, ids)
+        await session.flush()
+        # GH #599: the services dictionary references must exist before
+        # the services themselves (FK=ON flush idiom).
+        await _seed_specialties(session, ids)
         await session.flush()
         await _seed_services(session, ids)
         await session.flush()

@@ -33,12 +33,27 @@ SERVICE_CREATE = {
     "title": "Test Service",
     "description": "Test",
     "image_url": "https://example.com/test.jpg",
-    "specialty": "живопись",
+    # GH #599: specialty_id injected per test by ``_service_create_specialty``.
     "min_age": 6,
     "max_age": 99,
     "duration": 90,
     "record_info": "info",
 }
+
+
+@pytest.fixture(autouse=True)
+def _service_create_specialty(request):
+    """GH #599: give the shared create payload a valid direction reference."""
+    if "pure_unit" in request.keywords:
+        # pure_unit tests skip reset_db (no truncate) — pulling api_client
+        # in here would leak the admin row into the NEXT pure test's
+        # skipped truncate (users.phone UNIQUE). Pure tests never touch
+        # the payload.
+        return
+    api_client = request.getfixturevalue("api_client")
+    resp = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    assert resp.status_code == 201, resp.text
+    SERVICE_CREATE["specialty_id"] = resp.json()["id"]
 
 MATERIAL_CREATE = {
     "title": "Test Material",

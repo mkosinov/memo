@@ -15,12 +15,28 @@ SERVICE_PAYLOAD = {
     "title": "Oil Painting",
     "description": "Learn oil painting",
     "image_url": "https://example.com/oil.jpg",
-    "specialty": "oil",
+    # GH #599: specialty_id injected per test by ``_service_payload_specialty``.
     "min_age": 12,
     "max_age": 99,
     "duration": 90,
     "record_info": "Bring apron",
 }
+
+
+@pytest.fixture(autouse=True)
+def _service_payload_specialty(request):
+    """GH #599: give the shared service payload a valid direction
+    reference (one «Живопись» dictionary row per test)."""
+    if "pure_unit" in request.keywords:
+        # pure_unit tests skip reset_db (no truncate) — pulling api_client
+        # in here would leak the admin row into the NEXT pure test's
+        # skipped truncate (users.phone UNIQUE). Pure tests never touch
+        # the payload.
+        return
+    api_client = request.getfixturevalue("api_client")
+    resp = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    assert resp.status_code == 201, resp.text
+    SERVICE_PAYLOAD["specialty_id"] = resp.json()["id"]
 
 LOCATION_PAYLOAD = {
     "title": "Studio 1",

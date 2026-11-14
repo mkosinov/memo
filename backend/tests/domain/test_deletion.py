@@ -52,6 +52,7 @@ from src.models.photo import Photo
 from src.models.position import Position, staff_positions
 from src.models.record import Record
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tag import (
     Tag,
@@ -529,13 +530,32 @@ class TestHasBlockingDeps:
         assert has_blocking_deps(nodes) is True
 
 
+async def _del_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (idempotent by title)."""
+    from sqlalchemy import select
+
+    existing = await db_session.execute(
+        select(Specialty).where(Specialty.title == "Живопись")
+    )
+    row = existing.scalar_one_or_none()
+    if row is not None:
+        return row
+    row = Specialty(title="Живопись")
+    db_session.add(row)
+    await db_session.flush()
+    return row
+
+
+
 # ─── 4. collect_dependencies (async, DB-seeded) ─────────────────────────────────
 
 
 class TestCollectDependenciesMaster:
     async def test_counts_all_five_deps(self, db_session) -> None:
         master = Staff(first_name="A", last_name="B")
-        service = Service(title="S", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="S", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="L", capacity=10)
         db_session.add_all([master, service, location])
@@ -571,7 +591,9 @@ class TestCollectDependenciesMaster:
         """A staff card with activities + a user but no tags/positions/extension
         → only present deps appear in the tree."""
         master = Staff(first_name="A2", last_name="B2")
-        service = Service(title="S2", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="S2", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="L2", capacity=10)
         db_session.add_all([master, service, location])
@@ -602,7 +624,9 @@ class TestCollectDependenciesMaster:
 class TestCollectDependenciesLocation:
     async def test_counts_activities_and_location_tags(self, db_session) -> None:
         master = Staff(first_name="L1", last_name="m")
-        service = Service(title="LS", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="LS", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="LL", capacity=10)
         db_session.add_all([master, service, location])
@@ -622,7 +646,9 @@ class TestCollectDependenciesLocation:
 class TestCollectDependenciesService:
     async def test_counts_all_four_deps(self, db_session) -> None:
         master = Staff(first_name="sv", last_name="m")
-        service = Service(title="SvS", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="SvS", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="SvL", capacity=10)
         db_session.add_all([master, service, location])
@@ -653,7 +679,9 @@ class TestCollectDependenciesClient:
     ) -> None:
         """Client→visitors cascade_preview = {"visits": N} — visits count, NO payments key."""
         master = Staff(first_name="c1", last_name="m")
-        service = Service(title="cS", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="cS", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="cL", capacity=50)
         client = Client(name="cc", phone=f"+7999{_uuid.uuid4().hex[:7]}",
@@ -696,7 +724,9 @@ class TestCollectDependenciesClient:
 
     async def test_no_visitors_no_cascade_preview(self, db_session) -> None:
         master = Staff(first_name="c2", last_name="m")
-        service = Service(title="c2S", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="c2S", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="c2L", capacity=50)
         client = Client(name="cc2", phone=f"+7999{_uuid.uuid4().hex[:8]}",
@@ -714,7 +744,9 @@ class TestCollectDependenciesRecord:
     async def test_counts_visits_payments_and_record_tags(self, db_session) -> None:
         """Record→visits(cascade user), payments(cascade user), record_tags(auto)."""
         master = Staff(first_name="r1", last_name="m")
-        service = Service(title="rS", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="rS", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="rL", capacity=50)
         db_session.add_all([master, service, location])
@@ -748,7 +780,9 @@ class TestCollectDependenciesRecord:
     async def test_zero_count_deps_are_skipped(self, db_session) -> None:
         """Record with visits but 0 payments + 0 record_tags → only visits in tree."""
         master = Staff(first_name="r2", last_name="m")
-        service = Service(title="r2S", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="r2S", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="r2L", capacity=50)
         db_session.add_all([master, service, location])
@@ -772,7 +806,9 @@ class TestCollectDependenciesRecord:
     async def test_no_deps_returns_empty(self, db_session) -> None:
         """Bare record (no visits/payments/tags) → empty dependency tree."""
         master = Staff(first_name="r3", last_name="m")
-        service = Service(title="r3S", description="d", image_url="i", specialty="живопись",
+        service_spec = await _del_spec(db_session)
+        service = Service(title="r3S", description="d", image_url="i",
+                          specialty_id=service_spec.id,
                           min_age=6, duration=90, record_info="r")
         location = Location(title="r3L", capacity=50)
         db_session.add_all([master, service, location])
@@ -798,8 +834,9 @@ class TestCollectDependenciesActivity:
         label-builders reused as is) + photos/activity_tags auto nodes
         without items."""
         master = Staff(first_name="a1", last_name="m")
+        service_spec = await _del_spec(db_session)
         service = Service(title="МК Гончарное дело", description="d", image_url="i",
-                          specialty="живопись", min_age=6, duration=90, record_info="r")
+                          specialty_id=service_spec.id, min_age=6, duration=90, record_info="r")
         location = Location(title="aL", capacity=10)
         client = Client(name="Алиса", phone=f"+7999{_uuid.uuid4().hex[:7]}",
                         email=None, channel="telegram")
@@ -891,8 +928,9 @@ class TestCollectDependenciesActivity:
         """Activity with no records/photos/tags → empty tree (§5 zero-count
         skip) → the clean 204 path downstream."""
         master = Staff(first_name="a2", last_name="m")
+        service_spec = await _del_spec(db_session)
         service = Service(title="a2S", description="d", image_url="i",
-                          specialty="живопись", min_age=6, duration=90, record_info="r")
+                          specialty_id=service_spec.id, min_age=6, duration=90, record_info="r")
         location = Location(title="a2L", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
@@ -911,8 +949,9 @@ class TestCollectDependenciesActivity:
         """Activity with photos but no records → only the auto photos node;
         no records/visits/payments nodes (the recursion needs records)."""
         master = Staff(first_name="a3", last_name="m")
+        service_spec = await _del_spec(db_session)
         service = Service(title="a3S", description="d", image_url="i",
-                          specialty="живопись", min_age=6, duration=90, record_info="r")
+                          specialty_id=service_spec.id, min_age=6, duration=90, record_info="r")
         location = Location(title="a3L", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
@@ -941,8 +980,9 @@ async def _seed_activity_with_record(
 ) -> tuple[Activity, Record]:
     """One activity (start fixed 2026-09-18 10:00) with a single record."""
     master = Staff(first_name="lbl", last_name="m")
+    service_spec = await _del_spec(db_session)
     service = Service(title=service_title, description="d", image_url="i",
-                      specialty="живопись", min_age=6, duration=90, record_info="r")
+                      specialty_id=service_spec.id, min_age=6, duration=90, record_info="r")
     location = Location(title="lblL", capacity=10)
     db_session.add_all([master, service, location])
     if client is not None:
@@ -1063,8 +1103,9 @@ class TestCollectDependencyIdsActivity:
         """Activity with a client record + an anonymous record, one visit
         and one payment per record; optionally a photo + 2 tag links."""
         master = Staff(first_name="idc", last_name="m")
+        service_spec = await _del_spec(db_session)
         service = Service(title="idcS", description="d", image_url="i",
-                          specialty="живопись", min_age=6, duration=90,
+                          specialty_id=service_spec.id, min_age=6, duration=90,
                           record_info="r")
         location = Location(title="idcL", capacity=10)
         client = Client(name="Алиса", phone=f"+7999{_uuid.uuid4().hex[:7]}",
@@ -1129,8 +1170,9 @@ class TestCollectDependencyIdsActivity:
 
     async def test_empty_activity_yields_empty_map(self, db_session) -> None:
         master = Staff(first_name="idcE", last_name="m")
+        service_spec = await _del_spec(db_session)
         service = Service(title="idcES", description="d", image_url="i",
-                          specialty="живопись", min_age=6, duration=90,
+                          specialty_id=service_spec.id, min_age=6, duration=90,
                           record_info="r")
         location = Location(title="idcEL", capacity=10)
         db_session.add_all([master, service, location])
@@ -1148,8 +1190,9 @@ class TestCollectDependencyIdsActivity:
 
     async def test_photos_only_yields_only_photos_key(self, db_session) -> None:
         master = Staff(first_name="idcP", last_name="m")
+        service_spec = await _del_spec(db_session)
         service = Service(title="idcPS", description="d", image_url="i",
-                          specialty="живопись", min_age=6, duration=90,
+                          specialty_id=service_spec.id, min_age=6, duration=90,
                           record_info="r")
         location = Location(title="idcPL", capacity=10)
         db_session.add_all([master, service, location])

@@ -28,6 +28,7 @@ from src.models.activity import Activity
 from src.models.location import Location
 from src.models.master import Master
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 
 if TYPE_CHECKING:
@@ -37,6 +38,20 @@ pytestmark = pytest.mark.asyncio
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
+
+
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
 
 
 async def _add_staff(db_session: Any, **kwargs: Any) -> Staff:
@@ -63,7 +78,7 @@ async def _add_activity(db_session: Any, master_id: str) -> Activity:
         title="С",
         description="d",
         image_url="https://example.com/t.jpg",
-        specialty="живопись",
+        specialty_id=(await _t3_spec(db_session)).id,  # GH #599
         min_age=6,
         duration=60,
         record_info="",

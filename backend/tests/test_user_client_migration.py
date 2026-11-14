@@ -142,13 +142,10 @@ class TestOrmParity:
         """Every Base.metadata table exists after upgrade head with exactly
         the declared column names — the model side of the no-drift contract.
 
-        GH #599 transition window: ``services.specialty_id`` lives at the
-        DB level since R1, but the Service ORM model maps the column only
-        in the wave's Task 3 — until then that one column is the
-        whitelisted DB-only drift (both directions stay exact otherwise).
+        Exact both ways — since GH #599 Task 3 the Service ORM model maps
+        ``specialty_id`` and R2 dropped the legacy ``specialty`` column,
+        so no transition-window whitelist remains.
         """
-        # GH #599: DB-only columns awaiting their Task-3 model mapping.
-        db_only_whitelist = {"services": {"specialty_id"}}
         engine = create_engine(upgraded_url)
         try:
             inspector = sa.inspect(engine)
@@ -159,7 +156,7 @@ class TestOrmParity:
                 )
                 reflected = {c["name"] for c in inspector.get_columns(table.name)}
                 declared = {c.name for c in table.columns}
-                extra_db = reflected - declared - db_only_whitelist.get(table.name, set())
+                extra_db = reflected - declared
                 extra_model = declared - reflected
                 assert not extra_db and not extra_model, (
                     f"{table.name}: migration/model column drift —"

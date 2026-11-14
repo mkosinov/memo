@@ -6,6 +6,7 @@ The DB column ``is_active`` stays; the API Response must serialize ``archived``
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -25,6 +26,8 @@ def _service_orm(**overrides) -> SimpleNamespace:
         title="Painting 101",
         description="Intro class",
         image_url="https://example.com/i.jpg",
+        # GH #599: the ORM shape — reference + display property.
+        specialty_id=str(uuid4()),
         specialty="живопись",
         min_age=6,
         max_age=99,
@@ -46,6 +49,7 @@ def _service_kwargs(**overrides) -> dict:
         title="Painting 101",
         description="Intro class",
         image_url="https://example.com/i.jpg",
+        specialty_id=str(uuid4()),
         specialty="живопись",
         min_age=6,
         duration=90,
@@ -106,7 +110,7 @@ _BASE_REQUIRED = {
     "title": "Painting 101",
     "description": "Intro class",
     "image_url": "https://example.com/i.jpg",
-    "specialty": "живопись",
+    "specialty_id": str(uuid4()),  # GH #599: direction reference
     "min_age": 6,
     "duration": 90,
     "record_info": "info",

@@ -460,10 +460,12 @@ class TestAutoCollectEndToEnd:
             f"INSERT INTO masters (staff_id, specialty, color, is_active, "
             f"created_at, updated_at) VALUES ('{master}', 'живопись', "
             f"'#5B8C7A', 1, datetime('now'), datetime('now'))",
-            f"INSERT INTO services (id, title, description, image_url, specialty, "
+            "INSERT INTO specialties (id, title, created_at, updated_at) "
+            "VALUES ('spec-scen', 'Живопись', datetime('now'), datetime('now'))",
+            f"INSERT INTO services (id, title, description, image_url, specialty_id, "
             f"min_age, duration, record_info, is_active, created_at, updated_at) "
             f"VALUES ('{service}', 'Сценарная услуга', 'описание', "
-            f"'https://example.com/x.jpg', 'живопись', 6, 90, 'инфо', 1, "
+            f"'https://example.com/x.jpg', 'spec-scen', 6, 90, 'инфо', 1, "
             f"datetime('now'), datetime('now'))",
             f"INSERT INTO locations (id, title, capacity, sort_order, is_active, "
             f"created_at, updated_at) VALUES ('{location}', 'Сценарная студия', "

@@ -211,10 +211,14 @@ class LocationAdmin(ModelView, model=Location):
 
 
 class ServiceAdmin(ModelView, model=Service):
-    column_list: ClassVar[Sequence[_AdminAttr]] = [
+    # GH #599 R2: the free-text column is gone — the direction renders
+    # through the ``specialty_ref`` relationship (sqladmin resolves
+    # dotted attribute paths; the async lazy-load fallback is built in).
+    # The one list that mixes a string path: typed accordingly.
+    column_list: ClassVar[Sequence[_AdminAttr | str]] = [
         Service.id,
         Service.title,
-        Service.specialty,
+        "specialty_ref.title",
         Service.duration,
         Service.min_age,
         Service.max_age,

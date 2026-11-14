@@ -319,13 +319,58 @@ def create_staff(api_client):
 
 
 @pytest.fixture
-def create_service(api_client):
+def create_specialty(api_client):
+    """Factory: creates a specialty dictionary row via API (GH #599).
+
+    Usage::
+
+        spec = create_specialty()
+        spec = create_specialty(title="Керамика")
+    """
+    _counter = 0
+
+    def factory(title: str | None = None) -> dict:
+        nonlocal _counter
+        _counter += 1
+        payload = {"title": title or f"Направление {_counter}"}
+        resp = api_client.post("/api/v1/specialties", json=payload)
+        assert resp.status_code == 201, (
+            f"create_specialty failed: {resp.status_code}: {resp.text}"
+        )
+        return resp.json()
+
+    return factory
+
+
+@pytest.fixture
+def default_specialty(api_client, create_specialty):
+    """One default direction («Живопись») per test — the ``specialty_id``
+    source for service payloads that don't care about the direction
+    (GH #599: services reference the dictionary by id, not free text).
+
+    Find-or-create: suites often seed their own «Живопись» row first
+    (the title is unique case-insensitively — a blind POST would 409).
+    """
+    listed = api_client.get("/api/v1/specialties/all")
+    assert listed.status_code == 200, listed.text
+    for row in listed.json():
+        if row["title"].lower() == "живопись":
+            return row
+    return create_specialty("Живопись")
+
+
+@pytest.fixture
+def create_service(api_client, default_specialty):
     """Factory: creates a service via API.
 
     Usage::
 
         service = create_service()
         service = create_service(title="Картина маслом", duration=150)
+        service = create_service(specialty_id=other_specialty["id"])
+
+    GH #599: the direction rides ``specialty_id`` (the shared
+    ``default_specialty`` row unless overridden).
     """
     _counter = 0
 
@@ -336,7 +381,7 @@ def create_service(api_client):
             "title": f"Test Service {_counter}",
             "description": "Test service description",
             "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись",
+            "specialty_id": default_specialty["id"],
             "min_age": 6,
             "max_age": 99,
             "duration": 90,
@@ -799,7 +844,7 @@ async def db_session(db_engine):
 
 
 @pytest.fixture
-async def sample_record(api_client, db_session):
+async def sample_record(api_client, db_session, default_specialty):
     """Create a Record with 2 named visits + 1 anonymous visit (visitor_id NULL),
     return ORM object. Same "3 seats" shape as the pre-#257 fixture
     (2 visits + anonym_visits=1), but in the unified visitor model.
@@ -817,7 +862,7 @@ async def sample_record(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Rec Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Rec Studio", "address": "Rec Address", "capacity": 20,
@@ -864,7 +909,7 @@ async def sample_record(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_record_with_visits(api_client, db_session):
+async def sample_record_with_visits(api_client, db_session, default_specialty):
     """Create a Record with active visits having different statuses.
 
     Creates 2 visits: one 'visited', one 'waiting'.
@@ -881,7 +926,7 @@ async def sample_record_with_visits(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "St Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "St Studio", "address": "St Address", "capacity": 20,
@@ -914,7 +959,7 @@ async def sample_record_with_visits(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_activity_with_capacity(api_client, db_session):
+async def sample_activity_with_capacity(api_client, db_session, default_specialty):
     """Create an Activity with capacity=10, no records. Capacity check should pass."""
     from datetime import UTC, datetime, timedelta
 
@@ -926,7 +971,7 @@ async def sample_activity_with_capacity(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Cap Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Cap Studio", "address": "Cap Address", "capacity": 20,
@@ -945,7 +990,7 @@ async def sample_activity_with_capacity(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_activity_at_capacity(api_client, db_session):
+async def sample_activity_at_capacity(api_client, db_session, default_specialty):
     """Create an Activity (capacity=1) with a record using all seats.
 
     Then check_activity_capacity(seats=1) should raise 409.
@@ -961,7 +1006,7 @@ async def sample_activity_at_capacity(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Full Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Full Studio", "address": "Full Address", "capacity": 20,
@@ -993,7 +1038,7 @@ async def sample_activity_at_capacity(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_visit(api_client, db_session):
+async def sample_visit(api_client, db_session, default_specialty):
     """Create a single active Visit ORM object with its parent Record + Activity.
 
     Returns the Visit ORM object (not a dict). Used by VisitService CRUD tests.
@@ -1009,7 +1054,7 @@ async def sample_visit(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "V Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "V Studio", "address": "V Address", "capacity": 20,
@@ -1041,7 +1086,7 @@ async def sample_visit(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_visits(api_client, db_session):
+async def sample_visits(api_client, db_session, default_specialty):
     """Create a Record with 3 active Visit ORM objects. Returns list[Visit]."""
     import uuid as _uuid
     from datetime import UTC, datetime, timedelta
@@ -1054,7 +1099,7 @@ async def sample_visits(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Vs Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Vs Studio", "address": "Vs Address", "capacity": 20,

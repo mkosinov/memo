@@ -27,6 +27,7 @@ from src.models import (
     Visit,
     Visitor,
 )
+from src.models.specialty import Specialty
 from src.util.utc import utc_now
 
 
@@ -85,6 +86,14 @@ def _mk_master(session: Session, *, first_name: str = "A", last_name: str = "B",
     session.add(Master(staff_id=staff.id, specialty=specialty, color=color))
     session.flush()
     return staff.id
+
+
+def _mk_specialty(session: Session, title: str = "Живопись") -> Specialty:
+    """GH #599: create a dictionary row for service FK links."""
+    row = Specialty(title=title)
+    session.add(row)
+    session.flush()
+    return row
 
 
 @pytest.mark.pure_unit
@@ -281,7 +290,7 @@ class TestModelCrud:
             title="Portrait Painting",
             description="Learn to paint portraits",
             image_url="https://example.com/service.jpg",
-            specialty="живопись",
+            specialty_id=_mk_specialty(session).id,
             min_age=12,
             max_age=99,
             duration=120,
@@ -297,7 +306,8 @@ class TestModelCrud:
         from src.models import Service, Tariff
         svc = Service(
             title="S1", description="d", image_url="http://x.com/i",
-            specialty="живопись", min_age=1, max_age=99, duration=60, record_info="r",
+            specialty_id=_mk_specialty(session).id,
+            min_age=1, max_age=99, duration=60, record_info="r",
         )
         session.add(svc)
         session.flush()
@@ -358,7 +368,8 @@ class TestModelCrud:
         from src.models import Activity, Location, Service
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L", capacity=10)
         session.add_all([svc, loc])
@@ -465,7 +476,8 @@ class TestModelCrud:
         from src.models import Activity, Client, Location, Record, Service
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L", capacity=10)
         client = Client(name="Client", phone="+79001234567", channel="phone")
@@ -500,7 +512,8 @@ class TestModelCrud:
         )
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L", capacity=10)
         client = Client(name="C", phone="+79001234567", channel="phone")
@@ -539,7 +552,8 @@ class TestModelCrud:
         )
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L", capacity=10)
         client = Client(name="C", phone="+79001234567", channel="phone")
@@ -573,7 +587,7 @@ class TestModelCrud:
             title="Post-retirement Service",
             description="desc",
             image_url="https://example.com/img.jpg",
-            specialty="керамика",
+            specialty_id=_mk_specialty(session, "Керамика").id,
             min_age=5,
             max_age=50,
             duration=90,
@@ -613,7 +627,8 @@ class TestModelCrud:
 
     def test_service_tags_join(self, session: Session):
         from src.models import Service, Tag, service_tags
-        svc = Service(title="S2", description="d", image_url="http://x.com/i", specialty="керамика",
+        _spec = _mk_specialty(session, "керамика")
+        svc = Service(title="S2", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=5, max_age=50, duration=90, record_info="r")
         tag1 = Tag(title="for-kids")
         tag2 = Tag(title="weekend")
@@ -638,7 +653,8 @@ class TestModelCrud:
         from src.models import Activity, Location, Service, Tag, activity_tags
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S3", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S3", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L3", capacity=10)
         tag = Tag(title="private-class")

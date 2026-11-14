@@ -10,6 +10,31 @@ import pytest
 
 from tests.conftest import query_db
 
+
+@pytest.fixture(autouse=True)
+def _tariff_test_specialty(request):
+    """GH #599: one direction row per test — its id rides every service
+    payload in this module (``_SPECIALTY_ID``)."""
+    if "pure_unit" in request.keywords:
+        # pure_unit tests skip reset_db (no truncate) — pulling api_client
+        # in here would leak the admin row into the NEXT pure test's
+        # skipped truncate (users.phone UNIQUE). Pure tests never touch
+        # the payload.
+        return
+    api_client = request.getfixturevalue("api_client")
+    resp = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    assert resp.status_code == 201, resp.text
+    global _SPECIALTY_ID
+    _SPECIALTY_ID = resp.json()["id"]
+    # class-level _BASE dicts are plain mutable dicts — the reference is
+    # injected at call time (an inline ``"specialty_id": _SPECIALTY_ID``
+    # inside the class body would bind the import-time empty string).
+    TestTariffIdDiff._BASE["specialty_id"] = _SPECIALTY_ID
+    TestTariffIdDuplicate422._BASE["specialty_id"] = _SPECIALTY_ID
+
+
+_SPECIALTY_ID: str = ""
+
 pytestmark = pytest.mark.api
 
 
@@ -21,7 +46,7 @@ class TestServicePatchTariffs:
         create = api_client.post("/api/v1/services", json={
             "title": "Test Service", "description": "desc",
             "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
+            "specialty_id": _SPECIALTY_ID, "min_age": 6, "max_age": 99,
             "duration": 90, "record_info": "info",
             "tariffs": [{"title": "Old", "price": 1000}],
         })
@@ -48,7 +73,7 @@ class TestServicePatchTariffs:
         create = api_client.post("/api/v1/services", json={
             "title": "Test Service", "description": "desc",
             "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
+            "specialty_id": _SPECIALTY_ID, "min_age": 6, "max_age": 99,
             "duration": 90, "record_info": "info",
             "tariffs": [{"title": "Old", "price": 1000}],
         })
@@ -66,7 +91,7 @@ class TestServicePatchTariffs:
         create = api_client.post("/api/v1/services", json={
             "title": "Test Service", "description": "desc",
             "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
+            "specialty_id": _SPECIALTY_ID, "min_age": 6, "max_age": 99,
             "duration": 90, "record_info": "info",
             "tariffs": [{"title": "Keep", "price": 1500}],
         })
@@ -97,7 +122,6 @@ class TestTariffIdDiff:
         "title": "Test Service",
         "description": "desc",
         "image_url": "https://example.com/test.jpg",
-        "specialty": "живопись",
         "min_age": 6,
         "max_age": 99,
         "duration": 90,
@@ -392,7 +416,6 @@ class TestTariffIdDuplicate422:
         "title": "Test Service",
         "description": "desc",
         "image_url": "https://example.com/test.jpg",
-        "specialty": "живопись",
         "min_age": 6,
         "max_age": 99,
         "duration": 90,

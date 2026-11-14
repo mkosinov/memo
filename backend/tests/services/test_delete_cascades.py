@@ -42,6 +42,7 @@ from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tag import Tag, activity_tags, record_tags, visitor_tags
 from src.models.visit import Visit
@@ -54,6 +55,20 @@ pytestmark = pytest.mark.asyncio
 
 # ─── Direct-ORM setup helpers (bypass broken response schemas) ──────────────────
 
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
+
+
 async def _insert_activity(db_session) -> Activity:
     """Insert Staff + master extension + Service + Location + Activity (committed).
 
@@ -61,8 +76,9 @@ async def _insert_activity(db_session) -> Activity:
     masters extension PK (= staff id).
     """
     staff = Staff(first_name="M", last_name="L")
+    spec = await _t3_spec(db_session)
     service = Service(title="S", description="d", image_url="http://x",
-                     specialty="s", min_age=5, duration=60, record_info="r")
+                     specialty_id=spec.id, min_age=5, duration=60, record_info="r")
     location = Location(title="L", capacity=20)
     db_session.add_all([staff, service, location])
     await db_session.flush()
@@ -126,8 +142,9 @@ async def _insert_location(db_session) -> Location:
 
 async def _insert_service(db_session) -> Service:
     """Insert a bare Service (committed)."""
+    spec = await _t3_spec(db_session)
     service = Service(title="PhotoSvc", description="d", image_url="http://x",
-                      specialty="s", min_age=5, duration=60, record_info="r")
+                      specialty_id=spec.id, min_age=5, duration=60, record_info="r")
     db_session.add(service)
     await db_session.commit()
     return service

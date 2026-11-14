@@ -77,6 +77,19 @@ def _upgrade_to_head(db_path: Path) -> None:
     # Soft-deleted rows are covered by the backfill too.
     _seed_tariff(db_path, "t7", "Детский", is_active=0)
     _seed_tariff(db_path, "t8", "взрослый", is_active=0)
+    # GH #599 bridge: R2 flips services.specialty_id to NOT NULL — the
+    # legacy row links to a dictionary row BEFORE the chain continues
+    # (the real dev base is reseeded instead; this test only needs its
+    # rows to survive the walk to head).
+    command.upgrade(cfg, "a5c7e9b1d3f4")
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO specialties (id, title, created_at, updated_at)"
+            " VALUES ('spec-1', 'Живопись', datetime('now'), datetime('now'))"
+        ))
+        conn.execute(text("UPDATE services SET specialty_id = 'spec-1'"))
+    engine.dispose()
     command.upgrade(cfg, "head")
 
 

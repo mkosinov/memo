@@ -23,9 +23,9 @@ Delete-family dependency semantics (Task 2, domain rules Delete
 semantics): ``services`` is a VISIBLE BLOCKING dep
 (``allowed_actions: []``) — the counter covers ALL services incl.
 archived rows (the FK RESTRICT preview; the links are arranged at the
-DB level because the Service ORM model maps ``specialty_id`` only in
-Task 3); ``staff_specialties`` is AUTO-cascade (the materials pattern:
-commit ``{"resolutions": {}}`` unlinks staff cards, which survive).
+DB level, the raw-SQL join pattern); ``staff_specialties`` is
+AUTO-cascade (the materials pattern: commit ``{"resolutions": {}}``
+unlinks staff cards, which survive).
 """
 
 import uuid as _uuid
@@ -293,21 +293,17 @@ class TestSpecialtyDeleteLeaf:
 
 
 def _link_service(specialty_id: str, *, is_active: bool = True) -> str:
-    """Direct ``services`` row + R1 ``specialty_id`` link (raw SQL — the
-    Service ORM model maps the column only in Task 3, so the link is
-    arranged at the DB level; the tags/positions-suite raw-SQL join
-    pattern). Returns the service id."""
+    """Direct ``services`` row linked via ``specialty_id`` (raw SQL — the
+    tags/positions-suite raw-SQL join pattern; since R2 the legacy
+    ``specialty`` text column is dropped and the link is NOT NULL, so the
+    INSERT carries it in one statement). Returns the service id."""
     sid = f"svc-{_uuid.uuid4().hex[:8]}"
     query_db_params(
-        "INSERT INTO services (id, title, description, image_url, specialty, "
+        "INSERT INTO services (id, title, description, image_url, specialty_id, "
         "min_age, max_age, duration, record_info, is_active, created_at, updated_at) "
-        "VALUES (:id, 'Мастер-класс живописи', '', '', 'Живопись', 5, NULL, 90, '', "
+        "VALUES (:id, 'Мастер-класс живописи', '', '', :specialty_id, 5, NULL, 90, '', "
         ":is_active, datetime('now'), datetime('now'))",
-        {"id": sid, "is_active": 1 if is_active else 0},
-    )
-    query_db_params(
-        "UPDATE services SET specialty_id = :specialty_id WHERE id = :id",
-        {"specialty_id": specialty_id, "id": sid},
+        {"id": sid, "specialty_id": specialty_id, "is_active": 1 if is_active else 0},
     )
     return sid
 

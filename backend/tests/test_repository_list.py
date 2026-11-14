@@ -30,6 +30,7 @@ from sqlalchemy.orm import selectinload
 from src.models.activity import Activity
 from src.models.location import Location
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff  # GH #266: people entity
 from src.repositories.generic import get_archive_repository, get_base_repository
 from src.repositories.search import SearchField
@@ -50,13 +51,23 @@ def _master(**overrides) -> Staff:
     return Staff(**defaults)
 
 
-def _service(**overrides) -> Service:
-    """Build a Service with the full NOT NULL field set."""
+async def _service(db_session, **overrides) -> Service:
+    """Build a Service with the full NOT NULL field set (GH #599: the
+    direction is a dictionary reference — find-or-create «Живопись»)."""
+    spec = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if spec is None:
+        spec = Specialty(title="Живопись")
+        db_session.add(spec)
+        await db_session.flush()
     defaults: dict = dict(
         title="S",
         description="d",
         image_url="http://x",
-        specialty="живопись",
+        specialty_id=spec.id,
         min_age=0,
         duration=60,
         record_info="r",
@@ -119,7 +130,7 @@ async def test_list_order_by_applied(db_session) -> None:
 
 async def test_list_options_selectinload_does_not_break_count(db_session) -> None:
     """selectinload options are stripped from the count subquery; relationships eager-loaded."""
-    db_session.add(_service())
+    db_session.add(await _service(db_session))
     await db_session.flush()
     repo = get_base_repository()
     rows, total = await repo.list(
@@ -159,7 +170,7 @@ async def test_list_custom_count_excludes_order_by(db_session) -> None:
     # Case B: correlated scalar-subquery order key.
     # Seed an Activity for the "B" master so the subquery returns 1 for it
     # and 0 for the others — desc ordering puts "B" first.
-    svc = _service(title="for-activity")
+    svc = await _service(db_session, title="for-activity")
     db_session.add(svc)
     db_session.add(Location(title="L", capacity=10))
     await db_session.flush()

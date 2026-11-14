@@ -48,7 +48,17 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import OperationalError
 
 from src.db.database import DBManager
-from src.models import Location, Master, Material, Position, Service, Staff, Tag, Tariff
+from src.models import (
+    Location,
+    Master,
+    Material,
+    Position,
+    Service,
+    Specialty,
+    Staff,
+    Tag,
+    Tariff,
+)
 from src.models.enums import TariffAudience
 from src.models.position import staff_positions
 from src.models.service_material import ServiceMaterial
@@ -63,10 +73,11 @@ if TYPE_CHECKING:
 
 DEFAULT_DIR = Path(__file__).resolve().parents[2] / "seed-data"
 
-# Service.specialty is String(20) in the ORM; tag/location/service titles have
-# their own DB widths — the template mirrors them so a typo fails here, not on
-# INSERT.
-SPECIALTY_MAX = 20
+# The service ``specialty`` line is a TITLE REFERENCE into the specialties
+# dictionary (GH #599 §6): resolved case-insensitively by ``lower(title)``
+# at apply time; unknown title → SeedDataError naming the value. The width
+# mirrors the dictionary title column (String(100)).
+SPECIALTY_MAX = 100
 
 # Built-in positions, seeded by the staff-restructuring migration under fixed
 # string ids (``master``/``admin``). Titles are that migration's defaults; the
@@ -596,13 +607,28 @@ async def _apply_services(
     materials: dict[str, Material],
     summary: Summary,
 ) -> None:
+    # GH #599 §6: the YAML ``specialty`` line is a title reference into
+    # the ``specialties`` dictionary — resolved case-insensitively
+    # (``lower(title)``); an unknown title fails the load naming the
+    # value (the dictionary section itself is seeded separately).
+    specialties = {
+        row.title.lower(): row
+        for row in (await session.scalars(select(Specialty))).all()
+    }
     existing = {svc.title: svc for svc in (await session.scalars(select(Service))).all()}
     stats = summary.bucket("Услуги")
     for item in rows:
+        specialty = specialties.get(item.specialty.lower())
+        if specialty is None:
+            raise SeedDataError(
+                f"services.yaml «{item.title}»: направление «{item.specialty}» "
+                f"не найдено в справочнике. Объявите его в specialties "
+                f"или поправьте название"
+            )
         fields: dict[str, Any] = {
             "description": item.description,
             "image_url": item.image_url,
-            "specialty": item.specialty,
+            "specialty_id": specialty.id,
             "min_age": item.min_age,
             "max_age": item.max_age,
             "duration": item.duration,

@@ -31,6 +31,7 @@ from src.models.location import Location
 from src.models.master import Master
 from src.models.record import Record
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tag import Tag, visitor_tags
 from src.models.visit import Visit
@@ -44,6 +45,34 @@ from src.services.visitor import get_visitor_service
 # ─── Direct-ORM setup helpers (mirror tests/services/test_delete_cascades.py) ──
 
 
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
+
+
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
+
+
 async def _world(db_session) -> Activity:
     """Insert Staff + master extension + Service + Location + Activity."""
     staff = Staff(first_name="М", last_name="Л")
@@ -51,7 +80,7 @@ async def _world(db_session) -> Activity:
         title="S",
         description="d",
         image_url="i",
-        specialty="s",
+        specialty_id=(await _t3_spec(db_session)).id,
         min_age=5,
         duration=60,
         record_info="r",

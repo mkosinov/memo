@@ -30,6 +30,7 @@ assert COMMITTED ``audit_logs`` rows (the Task 3 harness pattern).
 """
 
 import json
+import uuid as _uuid
 
 import pytest
 
@@ -268,10 +269,12 @@ def _seed_record_chain() -> None:
         "INSERT INTO masters (staff_id, specialty, color, is_active, "
         "created_at, updated_at) VALUES ('m-aud', 'живопись', '#5B8C7A', 1, "
         "datetime('now'), datetime('now'))",
-        "INSERT INTO services (id, title, description, image_url, specialty, "
+        "INSERT INTO specialties (id, title, created_at, updated_at) "
+        "VALUES ('spec-aud', 'Живопись', datetime('now'), datetime('now'))",
+        "INSERT INTO services (id, title, description, image_url, specialty_id, "
         "min_age, duration, record_info, is_active, created_at, updated_at) "
         "VALUES ('svc-aud', 'Аудит услуга', 'о', 'https://e.com/x.jpg', "
-        "'живопись', 6, 90, 'и', 1, datetime('now'), datetime('now'))",
+        "'spec-aud', 6, 90, 'и', 1, datetime('now'), datetime('now'))",
         "INSERT INTO locations (id, title, capacity, sort_order, is_active, "
         "created_at, updated_at) VALUES ('loc-aud', 'Аудит студия', 20, 0, 1, "
         "datetime('now'), datetime('now'))",
@@ -970,15 +973,38 @@ class TestUserSettingsAudit:
 # ─── §4.3: ServiceService — nested writes around the repository ───────────────
 
 
-def _insert_service(svc_id: str, title: str, specialty: str = "живопись") -> None:
-    """Seed a service row directly (no service call → no journal row)."""
+_SPEC_NS = _uuid.uuid5(_uuid.NAMESPACE_OID, "memo-test-specialties")
+
+
+def _insert_specialty(title: str) -> str:
+    """Upsert a direction row, return its id (GH #599).
+
+    Deterministic uuid5 over the title: the same title within one test
+    resolves to the same row. The id MUST be a real UUID — the API
+    schemas type ``specialty_id: UUID``, so raw-SQL rows can't carry
+    slug-style ids."""
     from tests.conftest import query_db
 
+    spec_id = str(_uuid.uuid5(_SPEC_NS, title))
     query_db(
-        f"INSERT INTO services (id, title, description, image_url, specialty, "
+        "INSERT OR IGNORE INTO specialties (id, title, created_at, updated_at) "
+        f"VALUES ('{spec_id}', '{title}', datetime('now'), datetime('now'))"
+    )
+    return spec_id
+
+
+def _insert_service(svc_id: str, title: str, specialty: str = "живопись") -> None:
+    """Seed a service row directly (no service call → no journal row).
+    The direction is a dictionary reference (GH #599) — the helper links
+    the matching dictionary row."""
+    from tests.conftest import query_db
+
+    spec_id = _insert_specialty(specialty)
+    query_db(
+        f"INSERT INTO services (id, title, description, image_url, specialty_id, "
         f"min_age, duration, record_info, is_active, created_at, updated_at) "
         f"VALUES ('{svc_id}', '{title}', 'о', 'https://e.com/x.jpg', "
-        f"'{specialty}', 6, 90, 'и', 1, datetime('now'), datetime('now'))"
+        f"'{spec_id}', 6, 90, 'и', 1, datetime('now'), datetime('now'))"
     )
 
 
@@ -987,13 +1013,14 @@ class TestServiceServiceAudit:
         from src.schemas.service import ServiceCreate
         from src.services.service import get_service_service
 
+        spec_id = _insert_specialty("Живопись")
         svc = await get_service_service().create(
             db_session,
             ServiceCreate(
                 title="Валютная мастерская",
                 description="о",
                 image_url="https://e.com/x.jpg",
-                specialty="живопись",
+                specialty_id=spec_id,
                 min_age=6,
                 duration=90,
                 record_info="и",
@@ -1005,10 +1032,13 @@ class TestServiceServiceAudit:
         assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
             ("create", "services", svc.id)
         ]
-        assert rows[0]["entity_label"] == "Валютная мастерская, живопись"
+        # GH #599: the journaled scalar is the specialty_id REFERENCE
+        # (the display title lives in the dictionary); the label keeps
+        # the human title only.
+        assert rows[0]["entity_label"] == "Валютная мастерская"
         assert json.loads(rows[0]["changes"]) == {
             "title": [None, "Валютная мастерская"],
-            "specialty": [None, "живопись"],
+            "specialty_id": [None, spec_id],
             "duration": [None, 90],
             "is_active": [None, True],
         }
@@ -1025,7 +1055,7 @@ class TestServiceServiceAudit:
                 title="Новое название",
                 description="о",
                 image_url="https://e.com/x.jpg",
-                specialty="живопись",
+                specialty_id=_insert_specialty("живопись"),
                 min_age=6,
                 duration=120,
                 record_info="и",
@@ -1046,17 +1076,22 @@ class TestServiceServiceAudit:
         from src.services.service import get_service_service
 
         _insert_service("svc-p", "Неизменное название")
+        before = _insert_specialty("живопись")
+        target = _insert_specialty("графика")
         patched = await get_service_service().patch(
             db_session,
             "svc-p",
-            ServicePatch(specialty="графика"),
+            ServicePatch(specialty_id=target),
         )
         assert patched is not None
         rows = audit_rows()
         assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
             ("update", "services", "svc-p")
         ]
-        assert json.loads(rows[0]["changes"]) == {"specialty": ["живопись", "графика"]}
+        # GH #599: the journaled pair carries the direction ids.
+        assert json.loads(rows[0]["changes"]) == {
+            "specialty_id": [before, target]
+        }
 
     async def test_patch_service_noop_writes_nothing(self, db_session, actor, audit_rows) -> None:
         from src.schemas.service import ServicePatch
@@ -1085,7 +1120,7 @@ class TestServiceServiceAudit:
                 title="Неизменное название",
                 description="о",
                 image_url="https://e.com/x.jpg",
-                specialty="живопись",
+                specialty_id=_insert_specialty("живопись"),
                 min_age=6,
                 duration=90,
                 record_info="и",

@@ -647,11 +647,20 @@ def _seed_activity(api_client, master_id: str, service_id: str, location_id: str
 
 def _seed_service_and_location(api_client) -> tuple[str, str]:
     """The (service_id, location_id) pair an activity needs."""
+    # GH #599: the direction reference — create/fetch the dictionary row.
+    spec = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    spec_id = (
+        spec.json()["id"] if spec.status_code == 201
+        else next(
+            r["id"] for r in api_client.get("/api/v1/specialties/all").json()
+            if r["title"] == "Живопись"
+        )
+    )
     service = api_client.post(
         "/api/v1/services",
         json={
             "title": "S", "description": "D", "image_url": "http://x",
-            "specialty": "s", "min_age": 6, "max_age": 99,
+            "specialty_id": spec_id, "min_age": 6, "max_age": 99,
             "duration": 60, "record_info": "ri",
         },
     ).json()

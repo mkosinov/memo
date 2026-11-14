@@ -74,12 +74,26 @@ async def _add_staff(
     return staff
 
 
+async def _spec(db_session) -> Specialty:
+    """GH #599: one direction row per test (idempotent by title)."""
+    from sqlalchemy import select
+
+    row = (
+        await db_session.execute(select(Specialty).where(Specialty.title == "Живопись"))
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
+
+
 async def _add_service(db_session, title: str = "Гончарное дело") -> Service:
     service = Service(
         title=title,
         description="d",
         image_url="i",
-        specialty="живопись",
+        specialty_id=(await _spec(db_session)).id,
         min_age=6,
         duration=90,
         record_info="r",

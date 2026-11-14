@@ -8,14 +8,16 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException
 from sqlalchemy import delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import contains_eager, joinedload, selectinload
 
 from src.domain.errors import BareListLimitExceededError
+from src.domain.sorting import services_specialty_join
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.material import Material
 from src.models.service import Service
 from src.models.service_material import ServiceMaterial
+from src.models.specialty import Specialty
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.repositories.generic import ArchiveRepository, get_archive_repository
@@ -43,12 +45,15 @@ if TYPE_CHECKING:
 # scalar columns a user action can change; free-text fields
 # (``description``/``record_info``) never survive serialization (§5.1),
 # and the nested tariffs/tag_ids/materials are non-canonical cascade
-# children (never journaled, §4.2).
+# children (never journaled, §4.2). GH #599: ``specialty_id`` — the
+# journaled scalar is the reference (the display title lives in the
+# dictionary; reading it off the relationship here would lazy-load
+# under async SQLAlchemy).
 _SERVICE_MARK_FIELDS = (
     "title",
     "description",
     "image_url",
-    "specialty",
+    "specialty_id",
     "min_age",
     "max_age",
     "duration",
@@ -104,7 +109,11 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
     the unpaginated /all path doesn't route through the repo either).
     """
 
-    NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
+    # GH #599 §4.3: ``specialty_id`` replaces ``specialty`` — a NOT NULL
+    # FK, so the PATCH strip set carries it. The explicit-null case never
+    # reaches this strip: the ``ServicePatch`` schema validator rejects
+    # it with 422 (обнуление невозможно — spec §4.3).
+    NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty_id", "min_age", "duration", "record_info"}
 
     # GH #212 search matrix (spec §5.2): substring on title/description
     # (each field ilike'd separately), exact id equality when q parses as
@@ -114,6 +123,26 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         SearchField(Service.description),
         SearchField(Service.id, kind="uuid"),
     ]
+
+    async def _validate_specialty_id(
+        self, db_session: AsyncSession, specialty_id: str
+    ) -> None:
+        """Explicit prevalidation (GH #599 §4.3, the materials #223
+        pattern): an unknown ``specialty_id`` → 422 VALIDATION_ERROR
+        naming the id — never a raw FK IntegrityError from the flush."""
+        found = (
+            await db_session.execute(
+                select(Specialty.id).where(Specialty.id == specialty_id)
+            )
+        ).scalar_one_or_none()
+        if found is None:
+            raise HTTPException(
+                status_code=422,
+                detail=ErrorDetail(
+                    code=ErrorCode.VALIDATION_ERROR,
+                    message=f"Unknown specialty_id: {specialty_id}",
+                ).model_dump(),
+            )
 
     def __init__(
         self, repository: ArchiveRepository, model: type[Service]
@@ -151,11 +180,18 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         ``filters`` dict (column-equality via ``getattr(table, key)``
         only, ``repositories/generic.py``); hence the inline statement.
         Unknown-but-valid id simply matches no rows (filter semantics).
+
+        GH #599 §4.3 (no N+1): the statement LEFT-JOINs ``specialties``
+        (the shared ``services_specialty_join`` criterion — the same
+        join the ``specialty`` sort key orders by) and eager-loads the
+        relationship from it via ``contains_eager``: the display title
+        rides the list SELECT, zero per-row queries.
         """
-        stmt = select(Service).options(
+        stmt = services_specialty_join(select(Service)).options(
             selectinload(Service.tariffs),
             selectinload(Service.tags),
             selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
+            contains_eager(Service.specialty_ref),
         )
         if status == ArchiveStatus.ACTIVE:
             stmt = stmt.where(Service.is_active)
@@ -204,12 +240,15 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         ``_list_stmt`` has no ``.options(...)``, so the override builds the
         select inline with the same archive-status + equality-filter clauses.
         Enforces ``BARE_LIST_MAX_ROWS`` via the LIMIT+1 probe. Materials
-        links are eager-loaded too (GH #223 spec §3.1).
+        links are eager-loaded too (GH #223 spec §3.1); the specialty
+        display title rides the same LEFT JOIN as in ``list`` (GH #599
+        §4.3 — ``contains_eager`` over ``services_specialty_join``).
         """
-        stmt = select(Service).options(
+        stmt = services_specialty_join(select(Service)).options(
             selectinload(Service.tariffs),
             selectinload(Service.tags),
             selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
+            contains_eager(Service.specialty_ref),
         )
         if status == ArchiveStatus.ACTIVE:
             stmt = stmt.where(Service.is_active)
@@ -235,7 +274,9 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
     async def get(  # type: ignore[override]
         self, db_session: AsyncSession, id: str
     ) -> Service | None:
-        """Return a service by ID with tariffs, tags, and materials, or None."""
+        """Return a service by ID with tariffs, tags, materials, and the
+        linked specialty, or None. The specialty rides a many-to-one
+        ``joinedload`` (GH #599 §4.3 — single query, no N+1)."""
         result = await db_session.execute(
             select(Service)
             .where(Service.id == id)
@@ -243,6 +284,7 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
                 selectinload(Service.tariffs),
                 selectinload(Service.tags),
                 selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
+                joinedload(Service.specialty_ref),
             )
         )
         return result.scalar_one_or_none()
@@ -363,7 +405,11 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         """Create service with nested tariffs, tag links, and material links."""
         tag_ids = data.tag_ids
         tariff_data = data.tariffs
+        # GH #599: the direction reference is prevalidated (unknown id →
+        # 422) and narrowed to the String(36) column value (UUID → str).
+        await self._validate_specialty_id(db_session, str(data.specialty_id))
         service_data = data.model_dump(exclude={"tariffs", "tag_ids", "materials"})
+        service_data["specialty_id"] = str(service_data["specialty_id"])
 
         service = Service(**service_data)
         db_session.add(service)
@@ -417,7 +463,11 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
 
         tag_ids = data.tag_ids
         tariff_data = data.tariffs
+        # GH #599: PUT is a full replace — the direction reference is
+        # required, prevalidated, and narrowed to the column value.
+        await self._validate_specialty_id(db_session, str(data.specialty_id))
         update_data = data.model_dump(exclude={"tariffs", "tag_ids", "materials"})
+        update_data["specialty_id"] = str(update_data["specialty_id"])
 
         # GH #344 (§4.2): the "before" half of the diff is fixed BEFORE
         # the first in-session mutation.
@@ -488,6 +538,15 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         tag_ids = data_dict.pop("tag_ids", None)
         data_dict.pop("tariffs", None)
         data_dict.pop("materials", None)
+
+        # GH #599 §4.3: a sent ``specialty_id`` is prevalidated (unknown
+        # id → 422) and narrowed to the column value; the explicit-null
+        # case never lands here — the ``ServicePatch`` schema validator
+        # rejects it with 422 (обнуление невозможно). An absent field
+        # stays out of ``data_dict`` (exclude_unset) → direction kept.
+        if "specialty_id" in data_dict:
+            await self._validate_specialty_id(db_session, str(data_dict["specialty_id"]))
+            data_dict["specialty_id"] = str(data_dict["specialty_id"])
 
         # Strip NOT NULL fields sent as null
         for field in self.NOT_NULL_FIELDS:

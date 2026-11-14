@@ -2,10 +2,11 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.abstract import AbstractModelSoftDelete
+from src.models.specialty import Specialty
 
 if TYPE_CHECKING:
     from src.models.service_material import ServiceMaterial
@@ -19,11 +20,29 @@ class Service(AbstractModelSoftDelete):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text)
     image_url: Mapped[str] = mapped_column(Text)
-    specialty: Mapped[str] = mapped_column(String(20))
+    # GH #599 R2: the free-text ``specialty`` column is dropped — the
+    # direction is a NOT NULL FK into the ``specialties`` dictionary
+    # (ondelete=RESTRICT: a direction occupied by ANY service — archived
+    # included — cannot be hard-deleted; the explicit index serves the
+    # sort JOIN and the RESTRICT check, SQLite does not index FKs).
+    specialty_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("specialties.id", ondelete="RESTRICT"),
+        index=True,
+    )
     min_age: Mapped[int] = mapped_column(Integer)
     max_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration: Mapped[int] = mapped_column(Integer)
     record_info: Mapped[str] = mapped_column(Text)
+
+    # The dictionary side of the link (many-to-one). Named ``…_ref`` so
+    # the DISPLAY string keeps the natural ``specialty`` name below —
+    # the response schema reads it with ``from_attributes``. The
+    # Specialty import is RUNTIME (not TYPE_CHECKING): the quoted
+    # annotation must resolve at class-scan time (photo.py Client
+    # precedent; specialty.py imports nothing from this module — no
+    # cycle).
+    specialty_ref: Mapped[Specialty] = relationship("Specialty")
 
     tariffs: Mapped[list["Tariff"]] = relationship(
         "Tariff", back_populates="service", cascade="all, delete-orphan"
@@ -34,6 +53,18 @@ class Service(AbstractModelSoftDelete):
     service_materials: Mapped[list["ServiceMaterial"]] = relationship(
         "ServiceMaterial", back_populates="service", cascade="all, delete-orphan"
     )
+
+    @property
+    def specialty(self) -> str:
+        """Display string (GH #599 §4.3): the linked dictionary title.
+
+        Pydantic ``from_attributes`` reads this property. The caller
+        owns eager loading (``specialty_ref`` joined onto the statement
+        — ``ServiceService.get``/``list``/``list_all``); reading it off
+        a lazily-loaded relationship under async SQLAlchemy would raise
+        ``MissingGreenlet``.
+        """
+        return self.specialty_ref.title
 
     @property
     def materials(self) -> list[dict[str, str | None]]:

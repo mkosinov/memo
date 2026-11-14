@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.schemas.common import PaginatedResponse
 from src.services.service import get_service_service
 
@@ -15,10 +16,14 @@ pytestmark = pytest.mark.asyncio
 
 async def test_service_service_list_paginated(db_session):
     """ServiceService.list returns envelope with eager-loaded tariffs/tags."""
+    # GH #599: the direction is a dictionary reference.
+    spec = Specialty(title="Живопись")
+    db_session.add(spec)
+    await db_session.flush()
     for i in range(3):
         db_session.add(Service(
             title=f"S{i}", description="d", image_url="http://x",
-            specialty="s", min_age=5, duration=60, record_info="r",
+            specialty_id=spec.id, min_age=5, duration=60, record_info="r",
         ))
     await db_session.flush()
     service = get_service_service()
@@ -43,11 +48,14 @@ async def test_patch_duplicate_tariff_ids_do_not_blow_up_diff(db_session):
     from src.models.tariff import Tariff
     from src.schemas.service import ServicePatch, TariffUpdate
 
+    spec = Specialty(title="Живопись")
+    db_session.add(spec)
+    await db_session.flush()
     service = Service(
         title="S",
         description="d",
         image_url="http://x",
-        specialty="s",
+        specialty_id=spec.id,
         min_age=5,
         duration=60,
         record_info="r",

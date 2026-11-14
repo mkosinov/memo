@@ -32,6 +32,7 @@ from src.models.activity import Activity
 from src.models.location import Location
 from src.models.master import Master
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tag import Tag, activity_tags
 from src.services.activity import get_activity_service
@@ -72,9 +73,20 @@ async def _make_master(
 
 
 async def _make_service(db_session, *, is_active: bool = True) -> Service:
+    # GH #599: the direction is a dictionary reference (find-or-create —
+    # the seeded services all point at the same «Живопись» row).
+    spec = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if spec is None:
+        spec = Specialty(title="Живопись")
+        db_session.add(spec)
+        await db_session.flush()
     service = Service(
         title="Тест-услуга", description="d", image_url="https://example.com/x.jpg",
-        specialty="живопись", min_age=5, max_age=99, duration=60,
+        specialty_id=spec.id, min_age=5, max_age=99, duration=60,
         record_info="r", is_active=is_active,
     )
     db_session.add(service)

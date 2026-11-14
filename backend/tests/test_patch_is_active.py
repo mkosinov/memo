@@ -72,11 +72,13 @@ class TestPatchRejectsIsActive:
         get = api_client.get(f"/api/v1/materials/{material_id}").json()
         assert get["archived"] is False
 
-    def test_patch_service_is_active_rejected_and_atomic(self, api_client) -> None:
+    def test_patch_service_is_active_rejected_and_atomic(
+        self, api_client, default_specialty
+    ) -> None:
         service_id = api_client.post("/api/v1/services", json={
             "title": "Active Service", "description": "desc",
             "image_url": "https://example.com/s.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
+            "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99,
             "duration": 90, "record_info": "info",
         }).json()["id"]
 

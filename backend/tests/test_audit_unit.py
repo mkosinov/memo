@@ -201,11 +201,13 @@ class TestDerivedLabels:
         assert audit.pending_rows()[0]["entity_label"] == "Иванов Иван"
 
     def test_thing_title_with_extra_field(self, audit_ctx) -> None:
+        """GH #599 R2: the services label is the title alone — a
+        ``specialty_id`` pair in the changes is journaled, not labeled
+        (the display title lives in the dictionary)."""
         audit.mark_audit(entity="services", action="create", entity_id="s-1",
                          changes={"title": [None, "Стрижка мужская"],
-                                  "specialty": [None, "hair"]})
-        assert audit.pending_rows()[0]["entity_label"] == \
-            "Стрижка мужская, hair"
+                                  "specialty_id": [None, "3f2a..."]})
+        assert audit.pending_rows()[0]["entity_label"] == "Стрижка мужская"
 
     def test_unnamed_entity_prefixes_title(self, audit_ctx) -> None:
         audit.mark_audit(entity="payments", action="create", entity_id="p-1",

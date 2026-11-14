@@ -111,8 +111,12 @@ ENTITY_SIGNATURES: dict[str, EntitySignature] = {
     ),
     "services": EntitySignature(
         title="Услуга",
-        label_fields=("title", "specialty"),
-        snapshot_fields=("title", "specialty", "duration", "is_active"),
+        # GH #599 R2: the journaled scalar is ``specialty_id`` (the
+        # reference) — the display title lives in the dictionary and
+        # must not be read off the relationship here (lazy load under
+        # async SQLAlchemy); the label keeps the human title only.
+        label_fields=("title",),
+        snapshot_fields=("title", "specialty_id", "duration", "is_active"),
     ),
     "locations": EntitySignature(
         title="Локация",

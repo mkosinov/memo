@@ -36,6 +36,7 @@ from src.models.location import Location
 from src.models.master import Master
 from src.models.record import Record
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tariff import Tariff
 from src.models.visit import Visit
@@ -49,6 +50,20 @@ pytestmark = pytest.mark.asyncio
 # ─── Direct-ORM setup helpers (same style as test_delete_cascades.py) ──────────
 
 
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
+
+
 async def _insert_visited_tariff_graph(
     db_session: AsyncSession, *, visit_price: int = 1500,
 ) -> tuple[Visit, Tariff]:
@@ -58,8 +73,9 @@ async def _insert_visited_tariff_graph(
     price snapshot copied from it (the production creation flow).
     """
     staff = Staff(first_name="M", last_name="L")
+    spec = await _t3_spec(db_session)
     service = Service(title="S", description="d", image_url="http://x",
-                      specialty="s", min_age=5, duration=60, record_info="r")
+                      specialty_id=spec.id, min_age=5, duration=60, record_info="r")
     location = Location(title="L", capacity=20)
     db_session.add_all([staff, service, location])
     await db_session.flush()
@@ -128,7 +144,8 @@ async def test_service_delete_family_unhooks_visits_on_its_tariffs(
     # delete), only a tariff — and the visit is re-pointed at it, the
     # diff-update analogue of "tariff vanished while visits exist".
     dead = Service(title="Dead", description="d", image_url="http://x",
-                   specialty="s", min_age=5, duration=60, record_info="r")
+                   specialty_id=(await _t3_spec(db_session)).id,  # GH #599
+                   min_age=5, duration=60, record_info="r")
     db_session.add(dead)
     await db_session.flush()
     dead_tariff = Tariff(service_id=dead.id, title="DT", price=999)

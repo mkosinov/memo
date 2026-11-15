@@ -36,6 +36,7 @@ You **read both files yourself** (read/grep/glob/cat are allowed).
 - **Reuse:** The plan consumes the spec's `## Reuse` section — tasks extend/mirror the solutions it names (code, logic, domain rules). A task introduces a new component/hook/endpoint/piece of logic where the spec names an existing one → flag as "unrequested engineering decision". READ THE REPO to verify the named solutions exist.
 - **Internal consistency:** Tasks do not contradict each other; no task depends on something never created by an earlier task.
 - **Realistic classification:** Each task's classification (trivial / small / standard / large) is realistic given the described work.
+- **Dispatch layout:** every `large` task — and any `standard` task touching >5 files or needing full-suite verification — carries a `### Dispatch:` section: numbered executor-assigned subtasks (2–4 for standard / 3–5 for large), each naming ONE executor and its verification; full-suite verification assigned ONLY to `@tester`.
 - **No placeholders:** No `TBD`, `TODO`, "implement later", or vague steps remain in the plan.
 
 ### Report Format
@@ -46,4 +47,5 @@ You **read both files yourself** (read/grep/glob/cat are allowed).
   - Reuse violation: [plan task] invents [new thing] where spec `## Reuse` names [existing solution]
   - Inconsistency: [task X] contradicts / depends on missing [task Y]
   - Unrealistic classification: [task] marked [tier] but appears [other tier]
+  - Dispatch layout violation: [task] is [tier] without `### Dispatch:` / subtask count out of range / full suite assigned to a non-tester executor
   - Placeholder: [location] still contains TBD/TODO/vague step

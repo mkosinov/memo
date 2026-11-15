@@ -105,6 +105,8 @@ Tasks done: <list>
 
 The manager applies the delta and starts a FRESH IMPL session with "continue from Task N". Do not try to squeeze "one more small task" — handoff is cheaper than a degraded context.
 
+This gate caps YOUR OWN session only. Implementer sessions are capped by the coders' own gate: a coder hitting 150k commits, stops, and reports `CONTEXT_LIMIT` — handle it in 5b; never assume a dispatched coder is "fine" for hours.
+
 ### Phase Report Format (STRICT)
 
 Every report ends with:
@@ -309,6 +311,11 @@ Trigger: manager resumes you with "Gate B approved". (The worktree + baseline pa
    blocks, exact commands, no placeholders. The behavioral delta lives in the spec's
    `## Behavioral Delta` — a plan task implements a User Scenario, it does not restate behavior.
 2. Classify each task: trivial / small / standard / large (see Task Complexity Classification).
+   Objective criteria: >5 files touched or any full-suite verification → not below standard; a
+   `large` task MUST carry a `### Dispatch:` layout (3–5 subtasks); a `standard` task touching
+   >5 files or needing full-suite verification carries it too (2–4 subtasks); trivial/small stay
+   single-dispatch. Each subtask: name — executor — verification; full-suite verification ONLY
+   on `@tester` lines.
 3. Save to `docs/plans/YYYY-MM-DD-<feature>-plan.md`, commit (`docs: add plan for <feature>`).
    Do NOT push yet — push at Gate C auto-OK (or after the C-stop decision).
 4. Self-review: no TBD/TODO/"implement later". Apply Doc Working Discipline (plan-task headers
@@ -386,6 +393,14 @@ Triggered by manager dispatch. Two entry variants:
 
    Call `context_check` FIRST (see Context Gate → HANDOFF). Only on `OK`:
 
+   **Dispatch by the plan's `### Dispatch:` layout when the task carries one:** ONE implementer
+   session per subtask, in order. Each dispatch prompt carries that subtask's text (executor and
+   verification line included) and, for subtask N>1, a ONE-PARAGRAPH result delta of the previous
+   subtask — never the prior session's content. `BASE_SHA` is saved before the FIRST subtask,
+   `HEAD_SHA` after the last — the 5c review covers the whole task. A large task WITHOUT a layout
+   (legacy plan) → build the layout first (3–5 subtasks, e.g. schema/migration → logic → tests)
+   and dispatch by it; never one session for a large task.
+
    Verify the worktree:
    1. Read scratchpad → active worktree path.
    2. Verify: `ls <worktree path>` (wrong path = subagent writes to main).
@@ -421,6 +436,7 @@ Triggered by manager dispatch. Two entry variants:
    - DONE_WITH_CONCERNS → correctness/scope issues → RE-DISPATCH with clarifications; observations → note and proceed
    - NEEDS_CONTEXT → provide context, re-dispatch same task (resume same task_id)
    - BLOCKED → assess: context problem → re-dispatch; needs stronger model → re-dispatch; task too large → split; **env-related failure → dispatch `tester` to restore the environment, then re-dispatch the implementer (resume same task_id)**; plan wrong → report BLOCKED to manager
+   - CONTEXT_LIMIT → the implementer stopped at its own 150k gate (work committed). Decide the cheapest completion: FRESH re-dispatch of the remainder with a one-paragraph delta (default) → split the remainder into subtasks if it is still big → HANDOFF to manager if your own context is high too. NEVER resume the stopped session — its context is the problem.
    - NEVER fix code yourself.
 
    **5c. Review by Classification**
@@ -501,7 +517,7 @@ Rules: default to standard; downgrade only if ALL criteria met; trivial spot-che
 | Situation | Action |
 |-----------|--------|
 | Implementer misunderstood | Rewrite prompt, explain exactly what was wrong |
-| Implementer hit context limit | Split task smaller |
+| Implementer reports CONTEXT_LIMIT | Fresh re-dispatch of the remainder with a one-paragraph delta; split the remainder if still big; HANDOFF if own context is high — never resume the stopped session |
 | Tests failed (from reviewer) | Return to implementer with reviewer's issue list |
 | Implementer failed 2 times | Report BLOCKED to manager — no blind retries |
 | Blocked, cannot resolve | Report BLOCKED with full context for user decision |

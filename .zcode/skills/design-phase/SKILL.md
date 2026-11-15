@@ -98,6 +98,8 @@ superagents canon `docs/workflow/design-phase.md` §Fast-track (v3.10).
 - Plan: `docs/plans/YYYY-MM-DD-<feature>-plan.md` per the writing-plans conventions (canon: `~/dev/superagents/.opencode/skills/writing-plans/SKILL.md`):
   - header: Goal / Architecture / Tech Stack; the behavioral delta lives in the spec's `## Behavioral Delta` (memo deviation from the writing-plans canon, 2026-09-18) — a plan task implements a User Scenario, it does not restate behavior;
   - every task anchor: `## Task N: <name>` + `### Classification: trivial|small|standard|large`; after commit, never renumber anchors;
+  - classification uses objective criteria: >5 files touched or any full-suite verification → not below standard; a `large` task is invalid without a `### Dispatch:` layout;
+  - every `large` task — and any `standard` task touching >5 files or needing full-suite verification — carries `### Dispatch:`: numbered executor-assigned subtasks (2–4 for standard, 3–5 for large), each `name — executor (@backend-coder / @frontend-coder / @tester / @docser) — verification`; full-suite verification appears ONLY on `@tester` lines; trivial/small tasks stay single-dispatch without the section;
   - every task carries `### Required Docs` (domain-rules for entities, design-system for UI);
   - a task implements a User Scenario (from the spec's `## User Scenarios`) → its DoD line: "E2E test for scenario N passes (RED-GREEN-REFACTOR)";
   - no placeholders ("TBD", "add validation" — that is a plan failure).

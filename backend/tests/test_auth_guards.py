@@ -90,8 +90,9 @@ _PUBLIC_GETS = [
     # /api/v1/services`` left this matrix (and PUBLIC_ROUTES) — both
     # carry the masters:read / services:read guards now; the anonymous
     # dictionaries are /public/masters and /public/services (their own
-    # suites). Tags stay public until the Task 3.2 cleanup.
-    "/api/v1/tags",
+    # suites). Task 3.2: bare ``GET /api/v1/tags`` left too (tags:read
+    # guard) — tags have NO showcase of their own (the services
+    # showcase carries tag titles as sorted strings).
     # GH #493: the anonymous photo showcase lives at /public/photos —
     # bare ``GET /api/v1/photos`` is guarded now (photos:read).
     "/api/v1/public/photos",

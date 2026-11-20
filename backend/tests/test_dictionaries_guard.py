@@ -1,7 +1,8 @@
-"""GH #606 Task 3 — bare masters/services GETs are staff-only.
+"""GH #606 Task 3 — bare masters/services/tags GETs are staff-only.
 
-The shared ``GET /api/v1/masters``, ``GET /api/v1/services`` and
-``GET /api/v1/services/{id}`` left ``PUBLIC_ROUTES`` (#601 locations /
+The shared ``GET /api/v1/masters``, ``GET /api/v1/services``,
+``GET /api/v1/services/{id}``, ``GET /api/v1/tags`` and
+``GET /api/v1/tags/{id}`` left ``PUBLIC_ROUTES`` (#601 locations /
 #600 activities / #493 photos precedents): anonymous requests get 401,
 and so do CLIENT sessions — the client cookie ``memo_client_session``
 is a different cookie NAME that the staff guard (``require_session`` →
@@ -12,8 +13,9 @@ holds every dictionary-read permission). The anonymous dictionaries
 live at ``GET /api/v1/public/masters`` and ``GET /api/v1/public/services``
 (ADR-015, Task 2 — their own suites). Masters have NO bare ``GET /{id}``
 at all (removed with the mutations, #266) — nothing to close there.
-
-Tags stay public in this slice — the tags guard is Task 3.2.
+Tags closed the same way in Task 3.2 — with NO showcase of their own:
+the anonymous services showcase carries tag titles as sorted strings
+(spec §3.3; the last bare dictionary GETs left ``PUBLIC_ROUTES``).
 
 Domain rules: docs/domain-rules/auth.md (Public Access)
 """
@@ -33,6 +35,7 @@ pytestmark = pytest.mark.api
 
 MASTERS_URL = "/api/v1/masters"
 SERVICES_URL = "/api/v1/services"
+TAGS_URL = "/api/v1/tags"
 
 MASTER_PASSWORD = "master-pass-1"
 
@@ -91,6 +94,17 @@ def _client_session_on_jar(anon_client) -> None:
     anon_client.cookies.set("memo_client_session", token)
 
 
+def _seed_tag(api_client) -> dict:
+    """Seed ONE tag row via the admin write path (tags:write — admin
+    holds it; no ``create_tag`` factory in conftest — the test_api_tags
+    precedent: ``POST /api/v1/tags`` with a unique title)."""
+    resp = api_client.post(
+        "/api/v1/tags", json={"title": f"guard-{uuid.uuid4().hex[:8]}"}
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
 class TestBareDictionaryGetsAreStaffOnly:
     """#606 spec §3.3: anonymous / client sessions → 401 on the bare GETs."""
 
@@ -141,6 +155,39 @@ class TestBareDictionaryGetsAreStaffOnly:
         assert resp.status_code == 401, resp.text
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
 
+    # ── Task 3.2: the tags pair — the last bare dictionary GETs (#606
+    #    spec §3.3; no showcase of their own — the public services
+    #    showcase carries tag titles as sorted strings). ──
+
+    def test_anonymous_tags_list_401(self, anon_client) -> None:
+        resp = anon_client.get(TAGS_URL)
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
+
+    def test_anonymous_tags_single_401(self, anon_client, api_client) -> None:
+        """A REAL row id — the guard fires before any DB work; even an
+        existing tag must not be readable anonymously."""
+        tag = _seed_tag(api_client)
+        resp = anon_client.get(f"{TAGS_URL}/{tag['id']}")
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
+
+    def test_client_session_tags_list_401(self, anon_client, api_client) -> None:
+        _seed_tag(api_client)
+        _client_session_on_jar(anon_client)
+        resp = anon_client.get(TAGS_URL)
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
+
+    def test_client_session_tags_single_401(
+        self, anon_client, api_client
+    ) -> None:
+        tag = _seed_tag(api_client)
+        _client_session_on_jar(anon_client)
+        resp = anon_client.get(f"{TAGS_URL}/{tag['id']}")
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
+
 
 class TestMasterKeepsRead:
     """The master role holds all dictionary-read permissions → 200."""
@@ -166,6 +213,18 @@ class TestMasterKeepsRead:
         resp = master_client.get(f"{SERVICES_URL}/{service['id']}")
         assert resp.status_code == 200, resp.text
         assert resp.json()["id"] == service["id"]
+
+    def test_master_tags_list_200(self, master_client, api_client) -> None:
+        _seed_tag(api_client)
+        resp = master_client.get(TAGS_URL)
+        assert resp.status_code == 200, resp.text
+        assert "items" in resp.json()
+
+    def test_master_tags_single_200(self, master_client, api_client) -> None:
+        tag = _seed_tag(api_client)
+        resp = master_client.get(f"{TAGS_URL}/{tag['id']}")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"] == tag["id"]
 
 
 class TestStaffKeepsRead:

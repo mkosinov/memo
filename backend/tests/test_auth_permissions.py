@@ -229,7 +229,9 @@ class TestPublicRoutes:
         # the list — minimal 5-field / 10-field showcase schemas, only
         # acting / active+public rows; the bare GET /masters, /services
         # entries left with the #606 Task 3 cleanup (masters:read /
-        # services:read guards).
+        # services:read guards). Task 3.2: the bare tags GETs left too
+        # (tags:read guards) — tags have no showcase of their own (the
+        # services showcase carries tag titles as sorted strings).
         assert frozenset({
             ("GET", "/api/v1/health"),
             # GH #606 Task 3 (#601 / #600 / #493 precedents): bare
@@ -238,8 +240,11 @@ class TestPublicRoutes:
             # all three routes carry the masters:read / services:read
             # guards now; the anonymous dictionaries are /public/masters
             # and /public/services below.
-            ("GET", "/api/v1/tags"),
-            ("GET", "/api/v1/tags/{id}"),
+            # GH #606 Task 3.2: bare ("GET", "/api/v1/tags") and ("GET",
+            # "/api/v1/tags/{id}") left the allowlist — both routes
+            # carry the tags:read guard now; tags have NO showcase of
+            # their own (the services showcase below carries tag
+            # titles as sorted title strings).
             ("GET", "/api/v1/public/photos"),
             # GH #600: the anonymous schedule list — minimal audience
             # schema, private rows excluded server-side.

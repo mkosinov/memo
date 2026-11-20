@@ -118,14 +118,22 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     # ── Dictionary reads: reference data, no master-owned rows ──
     ("GET", "/api/v1/masters"): "dictionary read (acting masters, masters:read)",
     ("GET", "/api/v1/masters/all"): "dictionary read (masters:read)",
-    ("GET", "/api/v1/locations"): "dictionary read (public + locations:read)",
-    ("GET", "/api/v1/locations/{id}"): "dictionary read (public + locations:read)",
+    # GH #601 staleness cleanup (#606 Task 3.2): the bare location
+    # rationales lost the word "public" — the routes are NOT anonymous
+    # since #601 (locations:read guards); the public vitrine is the
+    # /public/locations entry below, with its own justification.
+    ("GET", "/api/v1/locations"): "dictionary read (locations:read)",
+    ("GET", "/api/v1/locations/{id}"): "dictionary read (locations:read)",
     ("GET", "/api/v1/locations/all"): "dictionary read (locations:read)",
     ("GET", "/api/v1/services"): "dictionary read (services:read)",
     ("GET", "/api/v1/services/{id}"): "dictionary read (services:read)",
     ("GET", "/api/v1/services/all"): "dictionary read (services:read)",
-    ("GET", "/api/v1/tags"): "dictionary read (public + tags:read)",
-    ("GET", "/api/v1/tags/{id}"): "dictionary read (public + tags:read)",
+    # GH #606 Task 3.2: the tags rationales lost the word "public" —
+    # the bare GETs are NOT anonymous anymore (tags:read guards, like
+    # masters/services above since Task 3.1); tags have no showcase of
+    # their own.
+    ("GET", "/api/v1/tags"): "dictionary read (tags:read)",
+    ("GET", "/api/v1/tags/{id}"): "dictionary read (tags:read)",
     ("GET", "/api/v1/tags/all"): "dictionary read (tags:read)",
     # ── ADR-015 public showcase: anonymous by design ──
     ("GET", "/api/v1/public/photos"): "public showcase (ADR-015): forced is_public=True, minimal schema, unscoped by design",

@@ -9,12 +9,14 @@ use entity-specific names (``{master_id}``, ``{photo_id}``, …), so the
 contract test normalizes route path params before comparing.
 
 Exactly this list, no more, no less:
-- ``GET`` dictionaries: tags — the last bare dictionary still here; bare
-  location GETs left the list with #601 (staff-only, locations:read),
-  bare activity GETs before them (#600), bare photo GETs (#493), and
-  bare masters/services GETs with #606 (staff-only, masters:read /
-  services:read); each keeps its anonymous showcase in the ``/public``
-  namespace below;
+- NO bare dictionary GET is anonymous anymore: the last one — tags —
+  left with #606 Task 3.2 (staff-only, tags:read; no showcase of its
+  own — the public services showcase below carries tag titles as
+  sorted strings), like bare masters/services GETs with #606
+  (masters:read / services:read), bare location GETs with #601
+  (locations:read), bare activity GETs before them (#600), and bare
+  photo GETs (#493); each of those keeps its anonymous showcase in
+  the ``/public`` namespace below (tags — via the services one);
 - ``GET /api/v1/public/photos`` — ``photos`` is NOT anonymous: bare
   photo GETs are staff-only (``photos:read``); the showcase lives at
   ``GET /api/v1/public/photos`` (ADR-015 audience namespace);
@@ -68,8 +70,11 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # "/api/v1/locations/{id}") were removed from here — both routes
         # carry the locations:read guard now; the anonymous dictionary
         # is the /public/locations entry below (ADR-015).
-        ("GET", "/api/v1/tags"),
-        ("GET", "/api/v1/tags/{id}"),
+        # GH #606 Task 3.2: bare ("GET", "/api/v1/tags") and ("GET",
+        # "/api/v1/tags/{id}") were removed from here — both routes
+        # carry the tags:read guard now; tags have NO showcase of
+        # their own (the anonymous services showcase below carries
+        # tag titles as sorted title strings, spec §3.3).
         # GH #600: bare ("GET", "/api/v1/activities") and ("GET",
         # "/api/v1/activities/{id}") were removed from here — both routes
         # carry the activities:read guard now; the anonymous schedule is

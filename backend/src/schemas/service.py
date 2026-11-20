@@ -267,3 +267,67 @@ class ServiceResponse(ServiceBase):
     @property
     def archived(self) -> bool:
         return not self.is_active
+
+
+class ServicePublicTariff(BaseModel):
+    """Nested tariff of ``ServicePublicResponse`` (GH #606 spec §3.2).
+
+    Exactly the showcase trio — the price range / the tariff choice at
+    booking. Staff-only ``description``/``audience``/``service_id``
+    never leave through the anonymous dictionary.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    price: int
+
+
+class ServicePublicMaterial(BaseModel):
+    """Nested material of ``ServicePublicResponse`` (GH #606 spec §3.2).
+
+    The "what to bring" list: the link ``note`` travels with the
+    material's ``description`` (the ``note ?? description`` fallback,
+    #223). The staff-contract ``id`` is dropped — the web never keys
+    materials.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str
+    description: str
+    note: str | None = None
+
+
+class ServicePublicResponse(BaseModel):
+    """Public services dictionary item — deliberately NOT
+    ServiceResponse (ADR-015, #606 spec §3.2).
+
+    Audience schema for the anonymous showcase dictionary
+    ``GET /api/v1/public/services``: exactly the 10 showcase fields —
+    the web-form fields (``title``, ``description``, ``image_url``,
+    ``specialty``, ages) plus the nested transport (tariffs,
+    materials, tags). ``max_age`` is the only nullable scalar (null =
+    no upper age limit); ``description``/``image_url`` stay non-empty
+    strings as at the source (empty string = none). Staff-only fields
+    (``duration``, ``record_info``, ``archived``, ``is_public``,
+    timestamps) never leave through this schema; archived and hidden
+    rows are excluded server-side on the route. ``tags`` are plain
+    title STRINGS sorted server-side (the ``PhotoPublicResponse``
+    #493 precedent — assembled by an explicit mapper, never
+    ``model_validate`` over ORM tags).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    description: str
+    image_url: str
+    specialty: str
+    min_age: int
+    max_age: int | None = None
+    tariffs: list[ServicePublicTariff] = []
+    materials: list[ServicePublicMaterial] = []
+    tags: list[str] = []

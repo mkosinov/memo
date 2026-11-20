@@ -116,13 +116,13 @@ SCOPE_WIRED_ROUTES: dict[str, dict[tuple[str, str], str]] = {
 #: against the live route table (a removed endpoint must not linger).
 ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     # ── Dictionary reads: reference data, no master-owned rows ──
-    ("GET", "/api/v1/masters"): "dictionary read (acting masters, public + masters:read)",
+    ("GET", "/api/v1/masters"): "dictionary read (acting masters, masters:read)",
     ("GET", "/api/v1/masters/all"): "dictionary read (masters:read)",
     ("GET", "/api/v1/locations"): "dictionary read (public + locations:read)",
     ("GET", "/api/v1/locations/{id}"): "dictionary read (public + locations:read)",
     ("GET", "/api/v1/locations/all"): "dictionary read (locations:read)",
-    ("GET", "/api/v1/services"): "dictionary read (public + services:read)",
-    ("GET", "/api/v1/services/{id}"): "dictionary read (public + services:read)",
+    ("GET", "/api/v1/services"): "dictionary read (services:read)",
+    ("GET", "/api/v1/services/{id}"): "dictionary read (services:read)",
     ("GET", "/api/v1/services/all"): "dictionary read (services:read)",
     ("GET", "/api/v1/tags"): "dictionary read (public + tags:read)",
     ("GET", "/api/v1/tags/{id}"): "dictionary read (public + tags:read)",

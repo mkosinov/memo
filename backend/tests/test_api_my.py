@@ -570,14 +570,19 @@ class TestPublicBoundary:
     def test_public_masters_leak_no_private_keys(
         self, api_client, login_as, _my_hash, anon
     ) -> None:
-        """Anonymous GET /masters: no private field key anywhere (S4)."""
+        """Anonymous masters dictionary: no private field key anywhere (S4).
+
+        GH #606: the anonymous surface is ``GET /api/v1/public/masters``
+        now (bare ``GET /masters`` is staff-only, masters:read) — the
+        boundary probe rides the showcase route.
+        """
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
         client.put(MASTER_URL, json={
             "patronymic": "Петровна",
             "passport_series_number": "4510 123456",
             "registration_address": "ул. Тверская, 5",
         })
-        resp = anon.get("/api/v1/masters")
+        resp = anon.get("/api/v1/public/masters")
         assert resp.status_code == 200, resp.text
         keys: set = set()
         _collect_keys(resp.json(), keys)

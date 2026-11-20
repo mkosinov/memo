@@ -9,10 +9,12 @@ use entity-specific names (``{master_id}``, ``{photo_id}``, …), so the
 contract test normalizes route path params before comparing.
 
 Exactly this list, no more, no less:
-- ``GET`` dictionaries: masters, services, tags — bare location GETs
-  left the list with #601 (staff-only, locations:read), like bare
-  activity GETs before them (#600) and bare photo GETs (#493); each
-  keeps its anonymous showcase in the ``/public`` namespace below;
+- ``GET`` dictionaries: tags — the last bare dictionary still here; bare
+  location GETs left the list with #601 (staff-only, locations:read),
+  bare activity GETs before them (#600), bare photo GETs (#493), and
+  bare masters/services GETs with #606 (staff-only, masters:read /
+  services:read); each keeps its anonymous showcase in the ``/public``
+  namespace below;
 - ``GET /api/v1/public/photos`` — ``photos`` is NOT anonymous: bare
   photo GETs are staff-only (``photos:read``); the showcase lives at
   ``GET /api/v1/public/photos`` (ADR-015 audience namespace);
@@ -25,12 +27,13 @@ Exactly this list, no more, no less:
 - ``GET /api/v1/public/masters`` — the anonymous masters dictionary
   (#606): only acting masters (``masters.is_active``), minimal 5-field
   showcase schema — the former anonymous bare ``GET /masters`` entry
-  leaves this list with the #606 cleanup (Task 3);
+  left this list with the #606 Task 3 cleanup (masters:read guard);
 - ``GET /api/v1/public/services`` — the anonymous services dictionary
   (#606): only active AND ``is_public`` services (the #601 visibility
   mirror), minimal 10-field showcase schema with nested tariffs /
   materials and tags as sorted title strings — the former anonymous
-  bare ``GET /services`` entries leave with the same cleanup (Task 3);
+  bare ``GET /services`` entries left with the same cleanup
+  (services:read guard);
 - ``GET /api/v1/health``;
 - the auth endpoints themselves (login / logout) + the public
   password-setup pair (#348 spec §5/§7: the authority of
@@ -55,17 +58,16 @@ from __future__ import annotations
 PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("GET", "/api/v1/health"),
-        # GH #266 D8: the masters view is read-only acting masters — the public
-        # paginated list stays (schedule + client site #48); GET /{id} was
-        # REMOVED with the mutations, so its allowlist entry is gone too.
-        # ``GET /masters/all`` carries the masters:read guard (NOT public).
-        ("GET", "/api/v1/masters"),
+        # GH #606 Task 3 (#601 / #600 / #493 precedents): bare
+        # ("GET", "/api/v1/masters"), ("GET", "/api/v1/services") and
+        # ("GET", "/api/v1/services/{id}") were removed from here — all
+        # three routes carry the masters:read / services:read guards
+        # now; the anonymous dictionaries are the /public/masters and
+        # /public/services entries below (ADR-015).
         # GH #601: bare ("GET", "/api/v1/locations") and ("GET",
         # "/api/v1/locations/{id}") were removed from here — both routes
         # carry the locations:read guard now; the anonymous dictionary
         # is the /public/locations entry below (ADR-015).
-        ("GET", "/api/v1/services"),
-        ("GET", "/api/v1/services/{id}"),
         ("GET", "/api/v1/tags"),
         ("GET", "/api/v1/tags/{id}"),
         # GH #600: bare ("GET", "/api/v1/activities") and ("GET",
@@ -90,7 +92,8 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # audience schema (nested tariffs/materials, tags as sorted
         # title strings), only active AND is_public services (the #601
         # visibility mirror); the former bare GET /services entries
-        # leave this list with the #606 Task 3 cleanup.
+        # left this list with the #606 Task 3 cleanup (services:read
+        # guard).
         ("GET", "/api/v1/public/services"),
         # GH #493: bare ("GET", "/api/v1/photos") and ("GET",
         # "/api/v1/photos/{id}") were removed from here — both routes carry

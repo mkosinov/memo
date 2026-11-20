@@ -142,6 +142,11 @@ class ServiceBase(BaseModel):
     max_age: int | None = None
     duration: int
     record_info: str
+    # GH #606: web visibility — true = shown on the client site
+    # (default), false = hidden from the site only. Inherited by
+    # Create/Update (the modal's canonical PUT carries the current flag
+    # value) and Response. Mirror of #601 (spec §3.6).
+    is_public: bool = True
 
 
 class ServiceCreate(ServiceBase):
@@ -201,6 +206,9 @@ class ServicePatch(BaseModel):
     max_age: int | None = None
     duration: int | None = None
     record_info: str | None = None
+    # GH #606: web visibility (PATCH carries it separately — no Base
+    # inheritance, mirror of #601). None means 'don't change'.
+    is_public: bool | None = None
     tag_ids: list[str] | None = None
     tariffs: list[TariffUpdate] | None = None
     materials: list[ServiceMaterialLinkIn] | None = None

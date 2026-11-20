@@ -43,7 +43,9 @@ if TYPE_CHECKING:
 # scalar columns a user action can change; free-text fields
 # (``description``/``record_info``) never survive serialization (§5.1),
 # and the nested tariffs/tag_ids/materials are non-canonical cascade
-# children (never journaled, §4.2).
+# children (never journaled, §4.2). GH #606: ``is_public`` joins the
+# list — a visibility toggle writes an audit line, and a flag-only PUT
+# is not an empty diff (spec §3.6).
 _SERVICE_MARK_FIELDS = (
     "title",
     "description",
@@ -53,6 +55,7 @@ _SERVICE_MARK_FIELDS = (
     "max_age",
     "duration",
     "record_info",
+    "is_public",
 )
 
 
@@ -104,7 +107,9 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
     the unpaginated /all path doesn't route through the repo either).
     """
 
-    NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
+    # GH #606: is_public is NOT NULL — a PATCH null means 'don't change'
+    # (mirror of LocationService, #601).
+    NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info", "is_public"}
 
     # GH #212 search matrix (spec §5.2): substring on title/description
     # (each field ilike'd separately), exact id equality when q parses as

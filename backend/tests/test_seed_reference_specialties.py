@@ -26,6 +26,7 @@ from src.models import Position, Service, Specialty, Staff
 from src.models.specialty import staff_specialties
 from src.seed.reference import (
     DEFAULT_DIR,
+    SPECIALTY_MAX,
     SeedDataError,
     Summary,
     apply_reference_data,
@@ -152,6 +153,17 @@ async def test_specialties_file_ci_duplicates_fail_load(tmp_path: Path) -> None:
         load_reference_data(tmp_path)
 
 
+def test_over_long_specialty_title_fails_load(spec_dir: Path) -> None:
+    """A dictionary title beyond the String(100) column width fails load
+    validation at PARSE time — a clean SeedDataError, not a raw DB error
+    (the bound ServiceIn.specialty already carries, mirrored here)."""
+    _write(spec_dir, "specialties.yaml", f"specialties:\n  - {'А' * (SPECIALTY_MAX + 1)}\n")
+
+    with pytest.raises(SeedDataError, match="заполнен неверно") as exc_info:
+        load_reference_data(spec_dir)
+    assert "specialties.yaml" in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # services.yaml — title reference, case-insensitive resolve
 # ---------------------------------------------------------------------------
@@ -276,6 +288,21 @@ def test_staff_master_block_without_specialties_fails_load(spec_dir: Path) -> No
 
     with pytest.raises(SeedDataError):
         load_reference_data(spec_dir)
+
+
+def test_over_long_staff_specialty_ref_fails_load(spec_dir: Path) -> None:
+    """A master-block specialty ref beyond the String(100) width fails load
+    validation at PARSE time (the ServiceIn.specialty bound, mirrored) —
+    not an unknown-ref cross-check error."""
+    _write(
+        spec_dir,
+        "staff.yaml",
+        STAFF_YAML.replace("[живопись, КЕРАМИКА]", f"[{'А' * (SPECIALTY_MAX + 1)}]"),
+    )
+
+    with pytest.raises(SeedDataError, match="заполнен неверно") as exc_info:
+        load_reference_data(spec_dir)
+    assert "staff.yaml" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

@@ -40,7 +40,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -66,7 +66,7 @@ from src.models.specialty import staff_specialties
 from src.models.tag import location_tags, master_tags, service_tags
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from typing import Any, Self
 
     from sqlalchemy import Table
@@ -79,6 +79,13 @@ DEFAULT_DIR = Path(__file__).resolve().parents[2] / "seed-data"
 # at apply time; unknown title → SeedDataError naming the value. The width
 # mirrors the dictionary title column (String(100)).
 SPECIALTY_MAX = 100
+
+# Every specialty title line — dictionary entries and title refs in
+# services/staff alike — must fit that String(100) column: the bound turns
+# an over-long value into a clean load-time SeedDataError instead of a raw
+# DB error. A runtime alias (the ``NormalizedTitle`` pattern in schemas):
+# pydantic resolves field annotations at class-build time.
+SpecialtyTitle = Annotated[str, Field(max_length=SPECIALTY_MAX)]
 
 # Built-in positions, seeded by the staff-restructuring migration under fixed
 # string ids (``master``/``admin``). Titles are that migration's defaults; the
@@ -170,7 +177,7 @@ class MasterIn(_In):
     # singular key is NOT accepted — ``extra="forbid"`` turns it into a
     # load error (a silent ignore would mask the rename).
     # min_length=1 mirrors D5: a live master block carries ≥1 direction.
-    specialties: list[str] = Field(min_length=1)
+    specialties: list[SpecialtyTitle] = Field(min_length=1)
     color: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
     is_active: bool = True
     tags: list[str] = Field(default_factory=list)
@@ -190,7 +197,7 @@ class SpecialtiesFile(_In):
     shape). The #612 CSV loader only swaps the parser producing the list —
     the apply step (``_apply_specialties``) is format-agnostic."""
 
-    specialties: list[str] = Field(default_factory=list)
+    specialties: list[SpecialtyTitle] = Field(default_factory=list)
 
 
 class LocationsFile(_In):
@@ -268,12 +275,17 @@ def _load_file[ModelT: BaseModel](directory: Path, filename: str, model: type[Mo
         raise SeedDataError(f"Файл {filename} заполнен неверно:\n{details}") from exc
 
 
-def _check_unique(values: list[str], what: str) -> None:
+def _check_unique(
+    values: list[str], what: str, *, key: Callable[[str], str] | None = None
+) -> None:
+    """Fail on the first repeated value; ``key`` narrows the identity
+    (e.g. ``str.lower`` — two spellings equal modulo case are one row)."""
     seen: set[str] = set()
     for value in values:
-        if value in seen:
+        identity = key(value) if key is not None else value
+        if identity in seen:
             raise SeedDataError(f"{what}: значение «{value}» встречается дважды — уберите дубль")
-        seen.add(value)
+        seen.add(identity)
 
 
 def _check_refs(
@@ -286,10 +298,12 @@ def _check_refs(
 ) -> None:
     """Every ``ref`` must be present in ``known``; unknown → error naming it.
 
-    ``case_insensitive=True`` (GH #599) matches by ``lower()`` — the caller
-    passes a LOWERED ``known`` set while ``refs`` keep their file literals,
-    so the error names the value exactly as written.
+    ``case_insensitive=True`` (GH #599) matches by ``lower()`` — ``known``
+    is normalized inside the function, while ``refs`` keep their file
+    literals, so the error names the value exactly as written.
     """
+    if case_insensitive:
+        known = {k.lower() for k in known}
     for ref in refs:
         hit = ref.lower() in known if case_insensitive else ref in known
         if not hit:
@@ -326,15 +340,7 @@ def load_reference_data(directory: Path) -> ReferenceData:
     # GH #599: the dictionary's own uniqueness is case-insensitive (the
     # lower(title) unique index) — a file pair like «Живопись»/«живопись»
     # is one row, so listing both is a duplicate to surface, not silence.
-    seen_specialties: set[str] = set()
-    for title in data.specialties:
-        key = title.lower()
-        if key in seen_specialties:
-            raise SeedDataError(
-                f"specialties.yaml: значение «{title}» встречается дважды "
-                f"(без учёта регистра) — уберите дубль"
-            )
-        seen_specialties.add(key)
+    _check_unique(data.specialties, "specialties.yaml", key=str.lower)
     _check_unique([loc.title for loc in data.locations], "locations.yaml")
     _check_unique([s.title for s in data.services], "services.yaml")
     _check_unique([p.title for p in data.positions], "staff.yaml (positions)")

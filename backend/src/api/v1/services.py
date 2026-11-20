@@ -1,4 +1,12 @@
-"""FastAPI router for service CRUD endpoints."""
+"""FastAPI router for service CRUD endpoints.
+
+GH #606 Task 3: the bare list/point-get GETs are staff-only
+(``services:read``) — both left ``PUBLIC_ROUTES`` (#601 locations /
+#600 activities / #493 photos precedents); the anonymous showcase is
+``GET /api/v1/public/services`` (ADR-015 audience namespace, the
+vitrine carrying tag titles as sorted strings). ``/all`` already
+carried the guard.
+"""
 
 from functools import lru_cache
 from typing import Annotated

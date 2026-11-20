@@ -86,13 +86,6 @@ _ENDPOINT_PARAMS = pytest.mark.parametrize(
 )
 
 _PUBLIC_GETS = [
-    # GH #606 Task 3: bare ``GET /api/v1/masters`` and ``GET
-    # /api/v1/services`` left this matrix (and PUBLIC_ROUTES) — both
-    # carry the masters:read / services:read guards now; the anonymous
-    # dictionaries are /public/masters and /public/services (their own
-    # suites). Task 3.2: bare ``GET /api/v1/tags`` left too (tags:read
-    # guard) — tags have NO showcase of their own (the services
-    # showcase carries tag titles as sorted strings).
     # GH #493: the anonymous photo showcase lives at /public/photos —
     # bare ``GET /api/v1/photos`` is guarded now (photos:read).
     "/api/v1/public/photos",
@@ -104,6 +97,12 @@ _PUBLIC_GETS = [
     # rows excluded server-side) — bare location GETs are guarded now
     # (locations:read, #601 Task 2).
     "/api/v1/public/locations",
+    # GH #606 Task 3: the anonymous masters/services dictionaries
+    # (ADR-015 audience namespace) — the bare GETs are guarded now
+    # (masters:read / services:read). Tags have NO showcase of their
+    # own — the services showcase carries tag titles as sorted strings.
+    "/api/v1/public/masters",
+    "/api/v1/public/services",
     "/api/v1/health",
 ]
 

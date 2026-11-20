@@ -19,9 +19,11 @@ from src.schemas.activity import (
 )
 from src.schemas.common import PaginatedResponse
 from src.schemas.location import LocationPublicResponse
+from src.schemas.master import MasterPublicResponse
 from src.schemas.photo import PhotoPublicResponse, PublicPhotoListParams
 from src.services.activity import list_public_activities_view
 from src.services.location import list_public_locations_view
+from src.services.master import list_public_masters_view
 from src.services.photo import list_public_photos_view
 
 router = APIRouter(tags=["public"])
@@ -77,5 +79,24 @@ async def list_public_locations(
     id``; capped by ``BARE_LIST_MAX_ROWS`` like every bare list."""
     try:
         return await list_public_locations_view(session)
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/masters", response_model=list[MasterPublicResponse])
+async def list_public_masters(
+    session: SessionDep,
+) -> list[MasterPublicResponse]:
+    """Public masters dictionary (GH #606, ADR-015): a bare JSON array —
+    no parameters at all (the ``/all`` canon, spec §3.1). Forced
+    server-side visibility: only ACTING masters — the exact
+    ``masters.is_active`` filter of the staff list (a master has no
+    ``is_public`` flag; an archived master never reaches the
+    showcase). Minimal 5-field ``MasterPublicResponse`` schema («имя,
+    специальность, фото»); pinned order ``sort_order, first_name, id``
+    (the staff-list order); capped by ``BARE_LIST_MAX_ROWS`` like
+    every bare list."""
+    try:
+        return await list_public_masters_view(session)
     except BareListLimitExceededError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -22,6 +22,10 @@ Exactly this list, no more, no less:
 - ``GET /api/v1/public/locations`` — the anonymous location dictionary
   (#601): bare location GETs are staff-only (``locations:read``),
   archived and non-public rows are excluded server-side;
+- ``GET /api/v1/public/masters`` — the anonymous masters dictionary
+  (#606): only acting masters (``masters.is_active``), minimal 5-field
+  showcase schema — the former anonymous bare ``GET /masters`` entry
+  leaves this list with the #606 cleanup (Task 3);
 - ``GET /api/v1/health``;
 - the auth endpoints themselves (login / logout) + the public
   password-setup pair (#348 spec §5/§7: the authority of
@@ -73,6 +77,10 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # audience schema, archived and non-public (is_public = false)
         # rows excluded server-side.
         ("GET", "/api/v1/public/locations"),
+        # GH #606: the anonymous masters dictionary — minimal 5-field
+        # audience schema, only acting masters (masters.is_active, the
+        # staff-list filter; masters have no is_public flag).
+        ("GET", "/api/v1/public/masters"),
         # GH #493: bare ("GET", "/api/v1/photos") and ("GET",
         # "/api/v1/photos/{id}") were removed from here — both routes carry
         # the photos:read guard now; the anonymous showcase is the

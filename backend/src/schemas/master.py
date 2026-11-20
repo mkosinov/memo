@@ -31,3 +31,26 @@ class MasterViewResponse(BaseModel):
     archived: bool  # = not masters.is_active (GH #267)
     created_at: datetime
     updated_at: datetime
+
+
+class MasterPublicResponse(BaseModel):
+    """Public masters dictionary item — deliberately NOT
+    MasterViewResponse (ADR-015, #606 spec §3.1).
+
+    Audience schema for the anonymous showcase dictionary
+    ``GET /api/v1/public/masters``: exactly the 5 showcase fields
+    («имя, специальность, фото») — ``avatar_url`` is the only nullable
+    one (mirrors the staff contract). Everything else (``color``,
+    ``sort_order``, ``archived``, timestamps) never leaves through this
+    schema; archived masters are excluded server-side on the route.
+    #599 note: ``specialty`` stays a plain string — that workstream
+    changes the VALUE source, not the type (spec §3.5).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    first_name: str
+    last_name: str
+    specialty: str
+    avatar_url: str | None = None

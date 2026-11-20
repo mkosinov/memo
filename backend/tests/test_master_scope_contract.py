@@ -131,6 +131,7 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/public/photos"): "public showcase (ADR-015): forced is_public=True, minimal schema, unscoped by design",
     ("GET", "/api/v1/public/activities"): "public schedule showcase (ADR-015/#600): is_private IS NOT TRUE, minimal schema, unscoped by design",
     ("GET", "/api/v1/public/locations"): "public dictionary (ADR-015/#601): active + is_public rows only, minimal schema, unscoped by design",
+    ("GET", "/api/v1/public/masters"): "public dictionary (ADR-015/#606): acting masters only (masters.is_active), minimal schema, unscoped by design",
     # ── System / transport ──
     ("GET", "/api/v1/health"): "system probe, anonymous",
     ("GET", "/api/v1/events"): "SSE transport, require_session — not entity data",

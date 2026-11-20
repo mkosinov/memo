@@ -1,10 +1,10 @@
 """Production reference-data loader — YAML templates in ``seed-data/``.
 
-Fills the *reference* tables only: tags, materials, positions, locations,
-services (+ tariffs, tag links, material links), staff (+ master extensions,
-position links, master tag links). Operational data (activities, clients,
-records, visits, payments) is NOT created — that is the dev seed's job
-(``src.seed.seed``).
+Fills the *reference* tables only: tags, materials, positions, specialties,
+locations, services (+ tariffs, tag links, material links), staff (+ master
+extensions, specialty links, position links, master tag links). Operational
+data (activities, clients, records, visits, payments) is NOT created — that
+is the dev seed's job (``src.seed.seed``).
 
 Contract:
 
@@ -165,7 +165,12 @@ class PositionIn(_In):
 
 
 class MasterIn(_In):
-    specialty: str = Field(min_length=1)
+    # GH #599 §6: the CSV line ``specialty`` (comma-separated string) is
+    # replaced by the ``specialties`` LIST of title references. The old
+    # singular key is NOT accepted — ``extra="forbid"`` turns it into a
+    # load error (a silent ignore would mask the rename).
+    # min_length=1 mirrors D5: a live master block carries ≥1 direction.
+    specialties: list[str] = Field(min_length=1)
     color: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
     is_active: bool = True
     tags: list[str] = Field(default_factory=list)
@@ -178,6 +183,14 @@ class StaffIn(_In):
     sort_order: int | None = None
     positions: list[str] = Field(default_factory=list)
     master: MasterIn | None = None
+
+
+class SpecialtiesFile(_In):
+    """GH #599 §6: a plain list of dictionary titles (the ``tags.yaml``
+    shape). The #612 CSV loader only swaps the parser producing the list —
+    the apply step (``_apply_specialties``) is format-agnostic."""
+
+    specialties: list[str] = Field(default_factory=list)
 
 
 class LocationsFile(_In):
@@ -209,6 +222,7 @@ class ReferenceData:
     services: list[ServiceIn] = field(default_factory=list)
     materials: list[MaterialIn] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    specialties: list[str] = field(default_factory=list)
     positions: list[PositionIn] = field(default_factory=list)
     staff: list[StaffIn] = field(default_factory=list)
 
@@ -262,9 +276,23 @@ def _check_unique(values: list[str], what: str) -> None:
         seen.add(value)
 
 
-def _check_refs(owner: str, refs: list[str], known: set[str], source: str) -> None:
+def _check_refs(
+    owner: str,
+    refs: list[str],
+    known: set[str],
+    source: str,
+    *,
+    case_insensitive: bool = False,
+) -> None:
+    """Every ``ref`` must be present in ``known``; unknown → error naming it.
+
+    ``case_insensitive=True`` (GH #599) matches by ``lower()`` — the caller
+    passes a LOWERED ``known`` set while ``refs`` keep their file literals,
+    so the error names the value exactly as written.
+    """
     for ref in refs:
-        if ref not in known:
+        hit = ref.lower() in known if case_insensitive else ref in known
+        if not hit:
             raise SeedDataError(
                 f"{owner}: «{ref}» не найдено в {source}. Добавьте его туда или поправьте название"
             )
@@ -278,6 +306,7 @@ def load_reference_data(directory: Path) -> ReferenceData:
     print(f"Читаю шаблоны: {directory}")
     tags_file = _load_file(directory, "tags.yaml", TagsFile)
     materials_file = _load_file(directory, "materials.yaml", MaterialsFile)
+    specialties_file = _load_file(directory, "specialties.yaml", SpecialtiesFile)
     locations_file = _load_file(directory, "locations.yaml", LocationsFile)
     services_file = _load_file(directory, "services.yaml", ServicesFile)
     staff_file = _load_file(directory, "staff.yaml", StaffFile)
@@ -287,12 +316,25 @@ def load_reference_data(directory: Path) -> ReferenceData:
         services=services_file.services,
         materials=materials_file.materials,
         tags=tags_file.tags,
+        specialties=specialties_file.specialties,
         positions=staff_file.positions,
         staff=staff_file.staff,
     )
 
     _check_unique(data.tags, "tags.yaml")
     _check_unique([m.title for m in data.materials], "materials.yaml")
+    # GH #599: the dictionary's own uniqueness is case-insensitive (the
+    # lower(title) unique index) — a file pair like «Живопись»/«живопись»
+    # is one row, so listing both is a duplicate to surface, not silence.
+    seen_specialties: set[str] = set()
+    for title in data.specialties:
+        key = title.lower()
+        if key in seen_specialties:
+            raise SeedDataError(
+                f"specialties.yaml: значение «{title}» встречается дважды "
+                f"(без учёта регистра) — уберите дубль"
+            )
+        seen_specialties.add(key)
     _check_unique([loc.title for loc in data.locations], "locations.yaml")
     _check_unique([s.title for s in data.services], "services.yaml")
     _check_unique([p.title for p in data.positions], "staff.yaml (positions)")
@@ -306,11 +348,22 @@ def load_reference_data(directory: Path) -> ReferenceData:
 
     tag_titles = set(data.tags)
     material_titles = {m.title for m in data.materials}
+    specialty_keys = {title.lower() for title in data.specialties}
 
     for location in data.locations:
         _check_refs(f"locations.yaml «{location.title}»", location.tags, tag_titles, "tags.yaml")
     for service in data.services:
         _check_refs(f"services.yaml «{service.title}»", service.tags, tag_titles, "tags.yaml")
+        # GH #599 §6: ``specialty`` is a title reference into the
+        # specialties dictionary — matched case-insensitively; an unknown
+        # title fails the load naming the file's literal.
+        _check_refs(
+            f"services.yaml «{service.title}»",
+            [service.specialty],
+            specialty_keys,
+            "specialties.yaml",
+            case_insensitive=True,
+        )
         _check_refs(
             f"services.yaml «{service.title}»",
             [m.title for m in service.materials],
@@ -323,16 +376,20 @@ def load_reference_data(directory: Path) -> ReferenceData:
         )
     for person in data.staff:
         if person.master is not None:
+            who = f"staff.yaml «{person.first_name} {person.last_name}»"
+            _check_refs(who, person.master.tags, tag_titles, "tags.yaml")
             _check_refs(
-                f"staff.yaml «{person.first_name} {person.last_name}»",
-                person.master.tags,
-                tag_titles,
-                "tags.yaml",
+                who,
+                person.master.specialties,
+                specialty_keys,
+                "specialties.yaml",
+                case_insensitive=True,
             )
 
     print(
         f"  локаций {len(data.locations)}, услуг {len(data.services)}, "
         f"тегов {len(data.tags)}, материалов {len(data.materials)}, "
+        f"направлений {len(data.specialties)}, "
         f"сотрудников {len(data.staff)}, должностей {len(data.positions)}"
     )
     return data
@@ -496,6 +553,27 @@ async def _apply_positions(
     return existing
 
 
+async def _apply_specialties(session: AsyncSession, titles: list[str], summary: Summary) -> None:
+    """Upsert the specialties dictionary by ``lower(title)`` (GH #599 §6,
+    the ``_apply_positions`` pattern: existing → untouched, no rename).
+
+    #612 seam: takes a plain list of titles — the apply step is
+    format-agnostic; switching the loader to CSV changes only the parser
+    that produces the list, not this function.
+    """
+    existing = {row.title.lower(): row for row in (await session.scalars(select(Specialty))).all()}
+    stats = summary.bucket("Направления")
+    for title in titles:
+        if title.lower() in existing:
+            stats.unchanged += 1
+            continue
+        row = Specialty(title=title)
+        session.add(row)
+        existing[title.lower()] = row
+        stats.created += 1
+    await session.flush()
+
+
 async def _apply_locations(
     session: AsyncSession,
     rows: list[LocationIn],
@@ -613,8 +691,7 @@ async def _apply_services(
     # (``lower(title)``); an unknown title fails the load naming the
     # value (the dictionary section itself is seeded separately).
     specialties = {
-        row.title.lower(): row
-        for row in (await session.scalars(select(Specialty))).all()
+        row.title.lower(): row for row in (await session.scalars(select(Specialty))).all()
     }
     existing = {svc.title: svc for svc in (await session.scalars(select(Service))).all()}
     stats = summary.bucket("Услуги")
@@ -683,8 +760,7 @@ async def _apply_staff(
     # GH #599 R3: the master-section directions resolve against the
     # specialties dictionary (case-insensitive; the services pattern).
     specialties = {
-        row.title.lower(): row
-        for row in (await session.scalars(select(Specialty))).all()
+        row.title.lower(): row for row in (await session.scalars(select(Specialty))).all()
     }
     staff_stats = summary.bucket("Сотрудники")
     master_stats = summary.bucket("Мастера")
@@ -723,12 +799,10 @@ async def _apply_staff(
 
         if item.master is None:
             continue
-        # GH #599 R3 mechanical edit (TODO(#599) Task 7 — the loader
-        # moves to the ``specialties: [titles]`` list key and the old
-        # CSV ``specialty`` key becomes a load error, spec §6): the
-        # masters row carries color/flag only; the YAML ``specialty``
-        # CSV line resolves case-insensitively into ``staff_specialties``
-        # links against the dictionary (the services.yaml pattern).
+        # GH #599 §6: the master block's ``specialties: [titles]`` resolve
+        # case-insensitively against the dictionary (the services.yaml
+        # pattern) into ``staff_specialties`` links; the old CSV key
+        # ``specialty`` is rejected at parse time (``extra="forbid"``).
         master_fields: dict[str, Any] = {
             "color": item.master.color,
             "is_active": item.master.is_active,
@@ -745,10 +819,7 @@ async def _apply_staff(
             master_stats.unchanged += 1
         await session.flush()
         desired_specialties: set[str] = set()
-        for title in item.master.specialty.split(","):
-            title = title.strip()
-            if not title:
-                continue
+        for title in item.master.specialties:
             specialty = specialties.get(title.lower())
             if specialty is None:
                 raise SeedDataError(
@@ -782,6 +853,9 @@ async def apply_reference_data(
     tags = await _apply_tags(session, data.tags, summary)
     materials = await _apply_materials(session, data.materials, summary)
     positions = await _apply_positions(session, data.positions, summary)
+    # GH #599: the dictionary must exist before the title references in
+    # services/staff resolve against it (FK=ON flush idiom).
+    await _apply_specialties(session, data.specialties, summary)
     await _apply_locations(session, data.locations, tags, summary)
     await _apply_services(session, data.services, tags, materials, summary)
     await _apply_staff(session, data.staff, positions, tags, summary)

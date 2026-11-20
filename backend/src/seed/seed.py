@@ -74,6 +74,7 @@ from src.models import (
 from src.models.enums import TariffAudience
 from src.models.photo import photo_tags
 from src.models.position import staff_positions
+from src.models.specialty import staff_specialties
 from src.models.tag import activity_tags, service_tags
 
 if TYPE_CHECKING:
@@ -126,7 +127,7 @@ FUNC_WEEK_START = datetime(2026, 6, 1)  # Monday, 2026-06-01
 
 WEEK_START = FUNC_WEEK_START - timedelta(days=14)  # 2026-05-18 — oldest functional week
 WEEK2_START = FUNC_WEEK_START - timedelta(days=7)  # 2026-05-25 — middle functional week
-WEEK3_START = FUNC_WEEK_START                      # 2026-06-01 — reference functional week
+WEEK3_START = FUNC_WEEK_START  # 2026-06-01 — reference functional week
 
 # Fixed reference week for visual regression baselines.
 # Activities and records r1-r6 in this week have stable dates so that
@@ -252,16 +253,16 @@ _ACTIVITIES_RAW_WEEK3: list[_ActivityRow] = [
 # Records r1-r6 link to activities here (indices 0,1,2,3,5,8).
 _ACTIVITIES_RAW_FIXED: list[_ActivityRow] = [
     # day, master, start_h, dur_h, svc_name, location, capacity, is_private
-    (0, "m1", 10, 2, "Морской пейзаж", "grand", 8, False),       # ev_fixed_0 → r1
-    (0, "m2", 12, 1.5, "Ручная лепка", "alpika", 6, False),      # ev_fixed_1 → r2
-    (1, "m3", 11, 2, "Картина акрилом", "alpika", 10, False),    # ev_fixed_2 → r3
-    (1, "m1", 15, 1, "Мини-картина акрилом", "grand", 8, False), # ev_fixed_3 → r4
-    (2, "m2", 14, 2, "Акварель", "p1389", 8, False),             # ev_fixed_4 (filler)
-    (3, "m1", 11, 2, "Морской пейзаж", "grand", 8, False),       # ev_fixed_5 → r5
-    (3, "m3", 16, 1, "Картина маслом", "alpika", 4, False),      # ev_fixed_6 (filler)
-    (4, "m2", 10, 2, "Ручная лепка", "alpika", 6, False),        # ev_fixed_7 (filler)
-    (5, "m1", 10, 2, "Морской пейзаж", "grand", 8, False),       # ev_fixed_8 → r6
-    (6, "m2", 11, 1.5, "Мини-картина акрилом", "grand", 6, False), # ev_fixed_9 (filler)
+    (0, "m1", 10, 2, "Морской пейзаж", "grand", 8, False),  # ev_fixed_0 → r1
+    (0, "m2", 12, 1.5, "Ручная лепка", "alpika", 6, False),  # ev_fixed_1 → r2
+    (1, "m3", 11, 2, "Картина акрилом", "alpika", 10, False),  # ev_fixed_2 → r3
+    (1, "m1", 15, 1, "Мини-картина акрилом", "grand", 8, False),  # ev_fixed_3 → r4
+    (2, "m2", 14, 2, "Акварель", "p1389", 8, False),  # ev_fixed_4 (filler)
+    (3, "m1", 11, 2, "Морской пейзаж", "grand", 8, False),  # ev_fixed_5 → r5
+    (3, "m3", 16, 1, "Картина маслом", "alpika", 4, False),  # ev_fixed_6 (filler)
+    (4, "m2", 10, 2, "Ручная лепка", "alpika", 6, False),  # ev_fixed_7 (filler)
+    (5, "m1", 10, 2, "Морской пейзаж", "grand", 8, False),  # ev_fixed_8 → r6
+    (6, "m2", 11, 1.5, "Мини-картина акрилом", "grand", 6, False),  # ev_fixed_9 (filler)
 ]
 
 
@@ -304,15 +305,17 @@ async def seed_staff_users(session: AsyncSession) -> None:
     from src.services.user_settings import UserSettingsService
 
     first_staff = (
-        await session.execute(
-            select(Staff).order_by(Staff.sort_order, Staff.id).limit(1)
-        )
+        await session.execute(select(Staff).order_by(Staff.sort_order, Staff.id).limit(1))
     ).scalar_one()
-    admin = User(phone="+79990000001", role="admin",
-                 password_hash=_STAFF_PASSWORDS_HASHED["admin12345"])
-    master = User(phone="+79990000002", role="master",
-                  staff_id=first_staff.id,
-                  password_hash=_STAFF_PASSWORDS_HASHED["master12345"])
+    admin = User(
+        phone="+79990000001", role="admin", password_hash=_STAFF_PASSWORDS_HASHED["admin12345"]
+    )
+    master = User(
+        phone="+79990000002",
+        role="master",
+        staff_id=first_staff.id,
+        password_hash=_STAFF_PASSWORDS_HASHED["master12345"],
+    )
     session.add(admin)
     session.add(master)
     # Flush so the client-side uuid4 default materializes the user ids.
@@ -333,26 +336,38 @@ _STAFF_RAW: list[tuple[str, dict[str, str | int]]] = [
     ("m7", {"first_name": "Ирина", "last_name": "Горох", "sort_order": 5}),
 ]
 
-_MASTER_EXTENSIONS: list[tuple[str, dict[str, str]]] = [
-    ("m1", {"specialty": "живопись", "color": "#5B8C7A"}),
-    ("m2", {"specialty": "керамика", "color": "#6B7E9C"}),
-    ("m3", {"specialty": "живопись", "color": "#A07060"}),
-    ("m4", {"specialty": "керамика", "color": "#7A6E9C"}),
-    ("m5", {"specialty": "живопись", "color": "#8A7840"}),
-    ("m7", {"specialty": "керамика", "color": "#9A5870"}),
-]
+# Master-section schedule colours, keyed by the staff aliases above.
+_MASTER_COLORS: dict[str, str] = {
+    "m1": "#5B8C7A",
+    "m2": "#6B7E9C",
+    "m3": "#A07060",
+    "m4": "#7A6E9C",
+    "m5": "#8A7840",
+    "m7": "#9A5870",
+}
+
+# Master-section directions (GH #599): staff alias → specialty aliases.
+# The order is deliberate data: m3's pair is NOT alphabetical («керамика»
+# before «живопись») — the distinguishing input of spec scenario 2 and the
+# sorting tests (§6). The DISPLAY string is always alphabetical
+# («Живопись, Керамика») — order never leaves the link table.
+_MASTER_SPECIALTIES: dict[str, list[str]] = {
+    "m1": ["живопись"],
+    "m2": ["керамика"],
+    "m3": ["керамика", "живопись"],
+    "m4": ["керамика"],
+    "m5": ["живопись"],
+    "m7": ["керамика"],
+}
 
 
 async def _seed_masters(session: AsyncSession, ids: _SeedIds) -> None:
     """Seed staff cards, positions, master extensions and links (#266).
 
-    GH #599 R3 (mechanical interim — the seed rework is Task 7): the
-    extension rows carry color only (the ``specialty`` CSV column is
-    dropped); the ``specialty`` aliases of ``_MASTER_EXTENSIONS`` become
-    ``staff_specialties`` links in ``_seed_specialties`` (the dictionary
-    rows and their registry ids land there, AFTER this call).
-    # TODO(#599) Task 7: the fuller dictionary seed (incl. a
-    # non-alphabetical multi-direction card per §6) replaces this wiring.
+    GH #599: the extension rows carry color only — the directions live in
+    ``_MASTER_SPECIALTIES`` and become ``staff_specialties`` links in
+    ``_seed_specialties`` (the dictionary rows land there, AFTER this
+    call).
     """
     for alias, fields in _STAFF_RAW:
         staff = Staff(id=_new_id(), **fields)
@@ -364,11 +379,9 @@ async def _seed_masters(session: AsyncSession, ids: _SeedIds) -> None:
     session.add(Position(id="admin", title="Администратор", is_system=True))
     session.add(Position(id="smm", title="СММ", is_system=False))
     # master extension rows: staff alias → registry id (color only —
-    # the direction aliases above become M2M links later in the flow)
-    for alias, ext_fields in _MASTER_EXTENSIONS:
-        session.add(
-            Master(staff_id=ids.get("staff", alias), color=ext_fields["color"])
-        )
+    # the directions become M2M links later in the flow)
+    for alias, color in _MASTER_COLORS.items():
+        session.add(Master(staff_id=ids.get("staff", alias), color=color))
     # FK=ON (#207 §11.3 idiom): flush parents before the Core link inserts
     # below — the Core inserts bypass the unit-of-work ordering.
     await session.flush()
@@ -376,18 +389,43 @@ async def _seed_masters(session: AsyncSession, ids: _SeedIds) -> None:
     for alias, _fields in _STAFF_RAW:
         await session.execute(
             staff_positions.insert().values(
-                staff_id=ids.get("staff", alias), position_id="master",
+                staff_id=ids.get("staff", alias),
+                position_id="master",
             )
         )
 
 
 _LOCATION_RAW: list[tuple[str, dict[str, str | int]]] = [
-    ("alpika", {"title": "Альпика", "address": "Альпика, 1 этаж", "capacity": 10,
-                "location_hint": "1 этаж, светлая студия с панорамными окнами", "sort_order": 0}),
-    ("grand", {"title": "Гранд Отель Поляна", "address": "Гранд Отель, лобби", "capacity": 12,
-               "location_hint": "Лобби отеля, зона у ресепшн", "sort_order": 1}),
-    ("p1389", {"title": "Поляна 1389", "address": "Поляна 1389, 2 этаж", "capacity": 8,
-               "location_hint": "2 этаж, рядом с детской зоной", "sort_order": 2}),
+    (
+        "alpika",
+        {
+            "title": "Альпика",
+            "address": "Альпика, 1 этаж",
+            "capacity": 10,
+            "location_hint": "1 этаж, светлая студия с панорамными окнами",
+            "sort_order": 0,
+        },
+    ),
+    (
+        "grand",
+        {
+            "title": "Гранд Отель Поляна",
+            "address": "Гранд Отель, лобби",
+            "capacity": 12,
+            "location_hint": "Лобби отеля, зона у ресепшн",
+            "sort_order": 1,
+        },
+    ),
+    (
+        "p1389",
+        {
+            "title": "Поляна 1389",
+            "address": "Поляна 1389, 2 этаж",
+            "capacity": 8,
+            "location_hint": "2 этаж, рядом с детской зоной",
+            "sort_order": 2,
+        },
+    ),
 ]
 
 
@@ -398,64 +436,131 @@ async def _seed_locations(session: AsyncSession, ids: _SeedIds) -> None:
         session.add(location)
 
 
-# GH #599 (Task 3 interim — the fuller dictionary seed is Task 7): the
-# direction titles used by the seeded services become dictionary rows;
-# the service literals below reference them by these aliases.
+# GH #599 §6: the directions dictionary. «Декор» is a deliberate FREE
+# leaf (no service, no staff link) — the e2e scenario 5c data (deleting a
+# direction with zero dependencies); «Живопись»/«Керамика» carry the
+# services and master sections.
 _SPECIALTY_RAW: list[tuple[str, str]] = [
     ("живопись", "Живопись"),
     ("керамика", "Керамика"),
+    ("декор", "Декор"),
 ]
 
 
 async def _seed_specialties(session: AsyncSession, ids: _SeedIds) -> None:
-    """Seed the specialties dictionary (GH #599) — the service direction
-    references resolve through the alias registry.
-
-    GH #599 R3 (mechanical interim): also links the seeded master
-    sections to their direction rows here (``_MASTER_EXTENSIONS``'s
-    ``specialty`` aliases → ``staff_specialties`` rows; the staff cards
-    were flushed by ``_seed_masters`` — FK=ON idiom holds).
-    # TODO(#599) Task 7: the fuller dictionary seed (incl. the
-    # non-alphabetical multi-direction card per §6) replaces this wiring.
+    """Seed the specialties dictionary (GH #599) and the master-section
+    links: the dictionary rows register their ids here, then the
+    ``_MASTER_SPECIALTIES`` aliases resolve through the registry into
+    ``staff_specialties`` rows (the staff cards were flushed by
+    ``_seed_masters`` — FK=ON idiom holds).
     """
-    from src.models.specialty import staff_specialties
-
     for alias, title in _SPECIALTY_RAW:
         specialty = Specialty(id=_new_id(), title=title)
         ids.put("specialties", alias, specialty.id)
         session.add(specialty)
     await session.flush()
-    for alias, ext_fields in _MASTER_EXTENSIONS:
-        await session.execute(
-            staff_specialties.insert().values(
-                staff_id=ids.get("staff", alias),
-                specialty_id=ids.get("specialties", ext_fields["specialty"]),
+    for alias, specialty_aliases in _MASTER_SPECIALTIES.items():
+        for specialty_alias in specialty_aliases:
+            await session.execute(
+                staff_specialties.insert().values(
+                    staff_id=ids.get("staff", alias),
+                    specialty_id=ids.get("specialties", specialty_alias),
+                )
             )
-        )
 
 
 _SERVICE_RAW: list[tuple[str, dict[str, str | int | None]]] = [
-    ("s1", {"title": "Картина маслом", "description": "Масляная живопись на холсте",
-            "image_url": "/images/card-seascape.jpg", "specialty_id": "живопись",
-            "min_age": 12, "max_age": None, "duration": 150, "record_info": "",}),
-    ("s2", {"title": "Картина акрилом", "description": "Акриловая живопись на холсте",
-            "image_url": "/images/card-mountain-acrylic.jpg", "specialty_id": "живопись",
-            "min_age": 6, "max_age": None, "duration": 120, "record_info": "",}),
-    ("s3", {"title": "Мини-картина акрилом", "description": "Миниатюра акрилом на маленьком холсте",
-            "image_url": "/images/card-watercolor.jpg", "specialty_id": "живопись",
-            "min_age": 6, "max_age": None, "duration": 90, "record_info": "",}),
-    ("s4", {"title": "Акварель", "description": "Акварельная живопись",
-            "image_url": "/images/card-watercolor.jpg", "specialty_id": "живопись",
-            "min_age": 6, "max_age": 12, "duration": 150, "record_info": "",}),
-    ("s5", {"title": "Ручная лепка", "description": "Лепка из глины",
-            "image_url": "/images/card-animals.jpg", "specialty_id": "керамика",
-            "min_age": 5, "max_age": None, "duration": 90, "record_info": "",}),
-    ("s6", {"title": "Роспись одежды", "description": "Роспись футболки или шоппера",
-            "image_url": "/images/card-shopper.jpg", "specialty_id": "живопись",
-            "min_age": 8, "max_age": None, "duration": 120, "record_info": "",}),
-    ("s7", {"title": "Морской пейзаж", "description": "Морской пейзаж маслом",
-            "image_url": "/images/card-seascape.jpg", "specialty_id": "живопись",
-            "min_age": 12, "max_age": None, "duration": 180, "record_info": "",}),
+    (
+        "s1",
+        {
+            "title": "Картина маслом",
+            "description": "Масляная живопись на холсте",
+            "image_url": "/images/card-seascape.jpg",
+            "specialty_id": "живопись",
+            "min_age": 12,
+            "max_age": None,
+            "duration": 150,
+            "record_info": "",
+        },
+    ),
+    (
+        "s2",
+        {
+            "title": "Картина акрилом",
+            "description": "Акриловая живопись на холсте",
+            "image_url": "/images/card-mountain-acrylic.jpg",
+            "specialty_id": "живопись",
+            "min_age": 6,
+            "max_age": None,
+            "duration": 120,
+            "record_info": "",
+        },
+    ),
+    (
+        "s3",
+        {
+            "title": "Мини-картина акрилом",
+            "description": "Миниатюра акрилом на маленьком холсте",
+            "image_url": "/images/card-watercolor.jpg",
+            "specialty_id": "живопись",
+            "min_age": 6,
+            "max_age": None,
+            "duration": 90,
+            "record_info": "",
+        },
+    ),
+    (
+        "s4",
+        {
+            "title": "Акварель",
+            "description": "Акварельная живопись",
+            "image_url": "/images/card-watercolor.jpg",
+            "specialty_id": "живопись",
+            "min_age": 6,
+            "max_age": 12,
+            "duration": 150,
+            "record_info": "",
+        },
+    ),
+    (
+        "s5",
+        {
+            "title": "Ручная лепка",
+            "description": "Лепка из глины",
+            "image_url": "/images/card-animals.jpg",
+            "specialty_id": "керамика",
+            "min_age": 5,
+            "max_age": None,
+            "duration": 90,
+            "record_info": "",
+        },
+    ),
+    (
+        "s6",
+        {
+            "title": "Роспись одежды",
+            "description": "Роспись футболки или шоппера",
+            "image_url": "/images/card-shopper.jpg",
+            "specialty_id": "живопись",
+            "min_age": 8,
+            "max_age": None,
+            "duration": 120,
+            "record_info": "",
+        },
+    ),
+    (
+        "s7",
+        {
+            "title": "Морской пейзаж",
+            "description": "Морской пейзаж маслом",
+            "image_url": "/images/card-seascape.jpg",
+            "specialty_id": "живопись",
+            "min_age": 12,
+            "max_age": None,
+            "duration": 180,
+            "record_info": "",
+        },
+    ),
 ]
 
 
@@ -519,7 +624,15 @@ async def _seed_tariffs(session: AsyncSession, ids: _SeedIds) -> None:
 
 
 async def _seed_tags(session: AsyncSession, ids: _SeedIds) -> None:
-    tag_titles = ["новинка", "хит", "для детей", "популярное", "индивидуальное", "сезонное", "гость"]
+    tag_titles = [
+        "новинка",
+        "хит",
+        "для детей",
+        "популярное",
+        "индивидуальное",
+        "сезонное",
+        "гость",
+    ]
     for i, title in enumerate(tag_titles, start=1):
         tag = Tag(id=_new_id(), title=title)
         ids.put("tags", f"tag{i}", tag.id)
@@ -530,16 +643,26 @@ async def _seed_activities(session: AsyncSession, ids: _SeedIds) -> None:
     # Alias prefixes keep the registry layout of the former literal ids
     # (ev_0… for the three fixed functional weeks, ev_fixed_0… for the
     # visual fixed week).
-    await _seed_activities_for(session, ids, "ev", [
-        (WEEK_START, _ACTIVITIES_RAW),
-        (WEEK2_START, _ACTIVITIES_RAW_WEEK2),
-        (WEEK3_START, _ACTIVITIES_RAW_WEEK3),
-    ])
+    await _seed_activities_for(
+        session,
+        ids,
+        "ev",
+        [
+            (WEEK_START, _ACTIVITIES_RAW),
+            (WEEK2_START, _ACTIVITIES_RAW_WEEK2),
+            (WEEK3_START, _ACTIVITIES_RAW_WEEK3),
+        ],
+    )
     # Fixed reference week with distinct alias prefix for visual regression
     # baselines.
-    await _seed_activities_for(session, ids, "ev_fixed", [
-        (WEEK_FIXED_START, _ACTIVITIES_RAW_FIXED),
-    ])
+    await _seed_activities_for(
+        session,
+        ids,
+        "ev_fixed",
+        [
+            (WEEK_FIXED_START, _ACTIVITIES_RAW_FIXED),
+        ],
+    )
 
 
 async def _seed_activities_for(
@@ -573,11 +696,28 @@ async def _seed_activities_for(
 
 
 _CLIENT_RAW: list[tuple[str, dict[str, str | None]]] = [
-    ("c1", {"name": "Анна Иванова", "phone": "+79001234567", "email": "anna@example.com", "channel": "telegram"}),
+    (
+        "c1",
+        {
+            "name": "Анна Иванова",
+            "phone": "+79001234567",
+            "email": "anna@example.com",
+            "channel": "telegram",
+        },
+    ),
     ("c2", {"name": "Мария Петрова", "phone": "+79002345678", "email": None, "channel": "max"}),
-    ("c3", {"name": "Елена Сидорова", "phone": "+79003456789", "email": None, "channel": "telegram"}),
-    ("c4", {"name": "Дмитрий Козлов", "phone": "+79004567890", "email": None, "channel": "whatsapp"}),
-    ("c5", {"name": "Ольга Новикова", "phone": "+79005678901", "email": None, "channel": "telegram"}),
+    (
+        "c3",
+        {"name": "Елена Сидорова", "phone": "+79003456789", "email": None, "channel": "telegram"},
+    ),
+    (
+        "c4",
+        {"name": "Дмитрий Козлов", "phone": "+79004567890", "email": None, "channel": "whatsapp"},
+    ),
+    (
+        "c5",
+        {"name": "Ольга Новикова", "phone": "+79005678901", "email": None, "channel": "telegram"},
+    ),
 ]
 
 
@@ -753,11 +893,7 @@ async def _seed_service_materials(session: AsyncSession, ids: _SeedIds) -> None:
             )
         )
         if not result.first():
-            session.add(
-                ServiceMaterial(
-                    service_id=service_id, material_id=material_id, note=note
-                )
-            )
+            session.add(ServiceMaterial(service_id=service_id, material_id=material_id, note=note))
 
 
 async def _seed_activity_tags(session: AsyncSession, ids: _SeedIds) -> None:
@@ -806,36 +942,88 @@ async def _seed_photos(session: AsyncSession, ids: _SeedIds) -> None:
     """
     # (alias, fields with FK aliases)
     photos: list[tuple[str, dict[str, object]]] = [
-        ("ph1", {"filename": "/images/client-work-1.jpg",
-                 "client_id": ids.get("clients", "c1"),
-                 "is_public": True, "created_at": PHOTO_FIXED_DATES["ph1"]}),
-        ("ph2", {"filename": "/images/client-work-2.jpg",
-                 "client_id": ids.get("clients", "c1"),
-                 "is_public": True, "created_at": PHOTO_FIXED_DATES["ph2"]}),
-        ("ph3", {"filename": "/images/card-seascape.jpg",
-                 "service_id": ids.get("services", "s1"),
-                 "is_public": True, "created_at": PHOTO_FIXED_DATES["ph3"]}),
-        ("ph4", {"filename": "/images/studio-alpika-interior.jpg",
-                 "location_id": ids.get("locations", "alpika"),
-                 "is_public": True, "created_at": PHOTO_FIXED_DATES["ph4"]}),
-        ("ph5", {"filename": "/images/tag-pair.jpg", "is_public": True,
-                 "created_at": PHOTO_FIXED_DATES["ph5"]}),
+        (
+            "ph1",
+            {
+                "filename": "/images/client-work-1.jpg",
+                "client_id": ids.get("clients", "c1"),
+                "is_public": True,
+                "created_at": PHOTO_FIXED_DATES["ph1"],
+            },
+        ),
+        (
+            "ph2",
+            {
+                "filename": "/images/client-work-2.jpg",
+                "client_id": ids.get("clients", "c1"),
+                "is_public": True,
+                "created_at": PHOTO_FIXED_DATES["ph2"],
+            },
+        ),
+        (
+            "ph3",
+            {
+                "filename": "/images/card-seascape.jpg",
+                "service_id": ids.get("services", "s1"),
+                "is_public": True,
+                "created_at": PHOTO_FIXED_DATES["ph3"],
+            },
+        ),
+        (
+            "ph4",
+            {
+                "filename": "/images/studio-alpika-interior.jpg",
+                "location_id": ids.get("locations", "alpika"),
+                "is_public": True,
+                "created_at": PHOTO_FIXED_DATES["ph4"],
+            },
+        ),
+        (
+            "ph5",
+            {
+                "filename": "/images/tag-pair.jpg",
+                "is_public": True,
+                "created_at": PHOTO_FIXED_DATES["ph5"],
+            },
+        ),
         # ev_1 and ev_4 both run at location 'alpika' (L1) — see
         # _ACTIVITIES_RAW indices 1 and 4.
-        ("ph6", {"filename": "/images/guest-1.jpg",
-                 "activity_id": ids.get("activities", "ev_1"),
-                 "is_public": True, "created_at": PHOTO_FIXED_DATES["ph6"]}),
-        ("ph7", {"filename": "/images/guest-2.jpg",
-                 "activity_id": ids.get("activities", "ev_4"),
-                 "is_public": True, "created_at": PHOTO_FIXED_DATES["ph7"]}),
-        ("ph_c1_private", {"filename": "/images/cabinet-draft.jpg",
-                           "client_id": ids.get("clients", "c1"),
-                           "is_public": False,
-                           "created_at": PHOTO_FIXED_DATES["ph_c1_private"]}),
-        ("ph_c2_private", {"filename": "/images/maria-canvas.jpg",
-                           "client_id": ids.get("clients", "c2"),
-                           "is_public": False,
-                           "created_at": PHOTO_FIXED_DATES["ph_c2_private"]}),
+        (
+            "ph6",
+            {
+                "filename": "/images/guest-1.jpg",
+                "activity_id": ids.get("activities", "ev_1"),
+                "is_public": True,
+                "created_at": PHOTO_FIXED_DATES["ph6"],
+            },
+        ),
+        (
+            "ph7",
+            {
+                "filename": "/images/guest-2.jpg",
+                "activity_id": ids.get("activities", "ev_4"),
+                "is_public": True,
+                "created_at": PHOTO_FIXED_DATES["ph7"],
+            },
+        ),
+        (
+            "ph_c1_private",
+            {
+                "filename": "/images/cabinet-draft.jpg",
+                "client_id": ids.get("clients", "c1"),
+                "is_public": False,
+                "created_at": PHOTO_FIXED_DATES["ph_c1_private"],
+            },
+        ),
+        (
+            "ph_c2_private",
+            {
+                "filename": "/images/maria-canvas.jpg",
+                "client_id": ids.get("clients", "c2"),
+                "is_public": False,
+                "created_at": PHOTO_FIXED_DATES["ph_c2_private"],
+            },
+        ),
     ]
     for alias, fields in photos:
         photo = Photo(id=_new_id(), **fields)
@@ -863,9 +1051,7 @@ async def _seed_photos(session: AsyncSession, ids: _SeedIds) -> None:
             )
         )
         if not result.first():
-            await session.execute(
-                photo_tags.insert().values(photo_id=photo_id, tag_id=tag_id)
-            )
+            await session.execute(photo_tags.insert().values(photo_id=photo_id, tag_id=tag_id))
 
 
 # (alias, title, description)
@@ -888,6 +1074,7 @@ async def _seed_materials(session: AsyncSession, ids: _SeedIds) -> None:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 async def seed_data(manager: DBManager) -> None:
     """Seed the database with mock development data.
@@ -947,9 +1134,7 @@ async def seed_data(manager: DBManager) -> None:
 
 async def main() -> None:
     """Entry point: connect, seed, disconnect."""
-    database_url = os.environ.get(
-        "DATABASE_URL", "sqlite+aiosqlite:///./memo.db"
-    )
+    database_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./memo.db")
     manager = DBManager(database_url)
     try:
         await seed_data(manager)

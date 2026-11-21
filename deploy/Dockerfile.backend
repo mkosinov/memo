@@ -1,0 +1,45 @@
+# Backend production image (GH #616, spec §3.1).
+#
+# Build (from repo root; context is backend/ — the app is self-contained there,
+# so a repo-root context would only bloat the upload and require a root .dockerignore):
+#   docker build -f deploy/Dockerfile.backend -t memo-backend:test backend/
+#
+# Runtime contract (spec §3.1–3.2):
+#   - uvicorn src.main:app, exactly ONE process, NO --reload (event fanout is
+#     single-process by design);
+#   - --forwarded-allow-ips is a TRUST BOUNDARY: only the address nginx/gateway
+#     connects from. Default = compose-network gateway (172.16.0.1, pinned by
+#     deploy/docker-compose.prod.yml); override via build ARG or env, NEVER '*'.
+#   - no curl / no HEALTHCHECK here: healthcheck lives in compose (python one-liner);
+#   - alembic ships in the image: migrations run as an explicit step
+#     (`docker compose run --rm backend alembic upgrade head`), not as entrypoint.
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+WORKDIR /app
+
+# Deps layer (cached unless pyproject/uv.lock change).
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+# App + migrations + runtime reference data (src/seed reads <repo>/seed-data).
+COPY src ./src
+COPY alembic ./alembic
+COPY alembic.ini ./
+COPY seed-data ./seed-data
+RUN uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Compose-network gateway by default (see header); env-overridable at runtime.
+ARG FORWARDED_ALLOW_IP=172.16.0.1
+ENV FORWARDED_ALLOW_IP=${FORWARDED_ALLOW_IP}
+
+EXPOSE 8000
+
+# `exec` replaces the shell so uvicorn is PID 1 and receives SIGTERM directly
+# (graceful stop → WAL flush within compose stop_grace_period).
+CMD exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IP"

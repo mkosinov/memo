@@ -77,7 +77,7 @@ flowchart TD
 
 ### 4.1 Release-команда: `scripts/release.sh <tag>`
 
-Через gh CLI: (1) проверяет milestone — все issues закрыты, иначе предупреждение и стоп (форс-флаг `--force` для осознанного обхода); (2) закрывает milestone; (3) собирает описание релиза из issues milestone (номер + заголовок); (4) `gh release create <tag> --target main`. Одна команда = релиз = выкат. Тег рекомендуем именем milestone (`v1`, `v1.1`).
+Через gh CLI: (1) проверяет milestone — все issues закрыты, иначе предупреждение и стоп (форс-флаг `--force` для осознанного обхода); (2) закрывает milestone; (3) собирает описание релиза из issues milestone (номер + заголовок); (4) `gh release create <tag> --target main`; флаг `--dry-run` — напечатать план (issues, тег, целевой коммит) без выполнения. Одна команда = релиз = выкат. Тег рекомендуем именем milestone (`v1`, `v1.1`).
 
 ### 4.2 `deploy.yml`
 

@@ -42,8 +42,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
-from sqlalchemy import asc, delete as sa_delete
-from sqlalchemy import func, select, update
+from sqlalchemy import asc, func, select, update
+from sqlalchemy import delete as sa_delete
 
 from src.domain.deletion import BlockingDepsError
 from src.domain.errors import (

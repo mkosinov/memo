@@ -12,7 +12,9 @@ vi.mock('@memo/api-client', () => ({
   getPublicLocations: vi.fn(),
   getLocations: vi.fn(),
   getPublicActivities: vi.fn(),
-  getServices: vi.fn(),
+  // #606: services come from the PUBLIC dictionary (bare array) — the
+  // staff getter stays in the api-client for admin-session consumers.
+  getPublicServices: vi.fn(),
   // #606: masters come from the PUBLIC dictionary (bare array); the paginated
   // /masters getter is gone from the api-client.
   getPublicMasters: vi.fn(),
@@ -22,14 +24,14 @@ import {
   getPublicLocations,
   getLocations,
   getPublicActivities,
-  getServices,
+  getPublicServices,
   getPublicMasters,
 } from '@memo/api-client';
 
 const mockedGetPublicLocations = getPublicLocations as Mock;
 const mockedGetLocations = getLocations as Mock;
 const mockedGetPublicActivities = getPublicActivities as Mock;
-const mockedGetServices = getServices as Mock;
+const mockedGetPublicServices = getPublicServices as Mock;
 const mockedGetPublicMasters = getPublicMasters as Mock;
 
 // #601: public dictionary rows — bare 4-field objects, no envelope.
@@ -130,7 +132,8 @@ describe('useLocations', () => {
 
   it('dedupes with useSchedule — same key, single public dictionary request', async () => {
     mockedGetPublicActivities.mockResolvedValue({ items: [], total: 0 });
-    mockedGetServices.mockResolvedValue({ items: [], total: 0 });
+    // #606: bare array — the public services dictionary has no envelope.
+    mockedGetPublicServices.mockResolvedValue([]);
     // #606: bare array — the public masters dictionary has no envelope.
     mockedGetPublicMasters.mockResolvedValue([]);
 

@@ -2,13 +2,13 @@
 
 import { useMemo, useCallback } from 'react';
 import { useQueries } from '@tanstack/react-query';
-import { getPublicActivities, getPublicMasters, getServices, getPublicLocations } from '@memo/api-client';
+import { getPublicActivities, getPublicMasters, getPublicServices, getPublicLocations } from '@memo/api-client';
 import type { PaginatedResponse } from '@memo/api-client';
 import type { ScheduleIndex } from '@memo/domain';
 import { buildWebSchedule, type WebScheduleDTO } from '@/app/lib/mappers/buildSchedule';
 import { toScheduleView } from '@/app/lib/mappers/to-schedule-vm';
 import type { ScheduleView, ScheduleFiltersView } from '@/app/lib/model/view/schedule';
-import type { ActivityResponse, ServiceResponse, MasterPublicResponse, LocationPublicResponse } from '@memo/api-client';
+import type { ActivityResponse, ServicePublicResponse, MasterPublicResponse, LocationPublicResponse } from '@memo/api-client';
 
 export interface UseScheduleResult {
   schedules: ScheduleView[];
@@ -39,8 +39,11 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
         refetchInterval: 60_000,
       },
       {
+        // #606: anonymous public services dictionary (bare array) — the
+        // staff-guarded paginated /services getter stays for admin-session
+        // consumers (ServicesContext, PhotoModal), not for the web form.
         queryKey: ['services'],
-        queryFn: () => getServices(),
+        queryFn: () => getPublicServices(),
         staleTime: 300_000,
         gcTime: 600_000,
       },
@@ -67,11 +70,11 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
   const index: ScheduleIndex<WebScheduleDTO> | null = useMemo(() => {
     if (queries.some((q) => q.isLoading || q.isError)) return null;
     const rawData = queries.map((q) => q.data);
-    // Activities/services list endpoints return the paginated envelope
-    // ({items, total}) — consume .items; #601/#606: the public location and
-    // masters dictionaries are BARE arrays (no envelope).
+    // The activities list endpoint returns the paginated envelope
+    // ({items, total}) — consume .items; #601/#606: the public location,
+    // masters and services dictionaries are BARE arrays (no envelope).
     const activities = (rawData[0] as PaginatedResponse<ActivityResponse> | undefined)?.items ?? [];
-    const services = (rawData[1] as PaginatedResponse<ServiceResponse> | undefined)?.items ?? [];
+    const services = (rawData[1] as ServicePublicResponse[] | undefined) ?? [];
     const masters = (rawData[2] as MasterPublicResponse[] | undefined) ?? [];
     const locations = (rawData[3] as LocationPublicResponse[] | undefined) ?? [];
     return buildWebSchedule(

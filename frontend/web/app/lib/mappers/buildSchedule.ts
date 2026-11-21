@@ -1,6 +1,6 @@
 import { ScheduleDTO, buildSchedule, resolveById } from '@memo/domain';
 import type { ScheduleIndex } from '@memo/domain';
-import type { ActivityResponse, ServiceResponse, MasterPublicResponse, LocationPublicResponse } from '@memo/api-client';
+import type { ActivityResponse, ServicePublicResponse, MasterPublicResponse, LocationPublicResponse } from '@memo/api-client';
 import type { TariffView } from '@/app/lib/model/view/tariff';
 
 // ─── Re-export for backward compatibility ──────────────────────────────────
@@ -28,13 +28,14 @@ function computePriceHint(tariffs: { title: string; price: number }[]): string {
   return tariffs.map(t => `${t.title}: ${t.price}₽`).join(', ');
 }
 
-function buildTagSet(serviceTags: { title: string }[]): string[] {
+// #606: vitrine tags are plain strings — no {id, title} objects on this path.
+function buildTagSet(serviceTags: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const t of serviceTags) {
-    if (!seen.has(t.title)) {
-      seen.add(t.title);
-      result.push(t.title);
+    if (!seen.has(t)) {
+      seen.add(t);
+      result.push(t);
     }
   }
   return result;
@@ -42,12 +43,14 @@ function buildTagSet(serviceTags: { title: string }[]): string[] {
 
 // ─── Main builder ──────────────────────────────────────────────────────────
 
-/** #601/#606: the location and masters maps carry PUBLIC dictionary rows —
- * exactly the ADR-015 showcase fields; this builder reads only
- * title/address/location_hint and first/last name + avatar. */
+/** #601/#606: the location, masters and services maps carry PUBLIC
+ * dictionary rows — exactly the ADR-015 showcase fields; this builder
+ * reads only title/address/location_hint, first/last name + avatar, and
+ * title/image_url/tariffs/materials/tags. Detail fields (description,
+ * ages, specialty) ride the transport but are not read (spec §3.4). */
 export function buildWebSchedule(
   activities: ActivityResponse[],
-  services: Map<string, ServiceResponse>,
+  services: Map<string, ServicePublicResponse>,
   masters: Map<string, MasterPublicResponse>,
   locations: Map<string, LocationPublicResponse>,
 ) {

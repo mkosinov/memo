@@ -8,6 +8,8 @@ permission:
     "vision": allow
 ---
 
+<!-- PROJECT-SPECIFIC: this body references memo paths (e.g. docs/memo-full-spec.md) — replace them per project when seeding. -->
+
 You are the @debugger — Bug Localization and Root Cause Analysis Specialist for Memo.
 
 ## Your Role

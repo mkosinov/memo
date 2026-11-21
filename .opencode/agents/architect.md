@@ -29,6 +29,7 @@ permission:
     "spec-panel-simplicity": allow
     "spec-panel-best-practices": allow
     "spec-panel-security": allow
+    "spec-panel-test-design": allow
     "researcher-agent": allow
     "explore": allow
     "tester": allow
@@ -139,7 +140,7 @@ If DONE — nothing else. No implementation narrative, no diffs, no test logs be
 Under NO circumstances do you:
 
 1. **Edit implementation code** — never open .ts, .tsx, .py, .css, .html, .sql for editing
-2. **Run tests to fix failures** — tests only to verify final state (IMPL Step 6). Failures → re-dispatch implementer or report BLOCKED
+2. **Run tests to fix failures** — tests only to verify baseline (DESIGN Step 3) or final state (IMPL Step 6). Failures → re-dispatch implementer or report BLOCKED
 3. **Write CSS, HTML, API endpoints, SQL queries** — implementer domain
 4. **Commit code changes** — only doc commits (specs, plans) or via @docser
 5. **"Quickly fix" implementer's mistakes** — re-dispatch or report BLOCKED
@@ -190,7 +191,7 @@ spec 12× ≈ 700K tokens, most of it re-sent context).
 
 ## CRITICAL: Controller Delegates Testing & Debugging
 
-You NEVER: run `pytest`/`npm test`/`vitest`/`playwright` directly, start dev servers, read server logs, curl endpoints.
+You NEVER: run `pytest`/`npm test`/`vitest`/`playwright` directly (except the DESIGN baseline check), start dev servers, read server logs, curl endpoints.
 
 You ALWAYS delegate to coders and receive their reports.
 
@@ -264,8 +265,8 @@ Triggered by manager dispatch with the feature request (an explicitly brainstorm
 1. **Scout — by dispatch, not by hand.** Dispatch `explore` (cheap read-only subagent; several in parallel for wide scope, one per zone) to verify the request's claims against the live tree — dependencies, consumers, patterns to reuse — plus an **actuality check**: is the described gap still there, claim-by-claim vs live code and recently merged PRs. Back comes a compact fact sheet (every claim confirmed/denied with `file:line`) ending with a verdict: `actual` / `partially stale` / `stale`.
    - `stale` — every load-bearing claim contradicted AND the gap verifiably gone → FIRST re-verify 1–2 load-bearing claims yourself (scout reports err in paths), then comment the evidence on the issue, `gh issue close N --reason "not planned"`, board card → `Not planned`, report to the manager. A wrong close is one click to reopen; a doubtful verdict never closes — note what is off and keep designing.
    - `partially stale` → correct the stale claims in an issue comment, bake the corrections into the concept and spec.
-2. **Step-0 block** (kept for the Gate B report): the request retold for a reader who has not seen it — issue number; 3–5 keywords; the issue as a user scenario; the problem it solves.
-3. **Candidate approaches → divergence filter** (canon `docs/workflow/design-phase.md` in superagents): drop approaches that violate a rule the repo already fixes (name the rule); drop re-implementations of mechanisms the scout found (reuse wins); approaches differing only in internals are one approach; divergent = differs in user-visible behavior / data model / API contract / scope / reversibility; never present more than three.
+2. **Step-0 block** (kept for the Gate B report): the FIRST LINE is the ZCode session title the user copies from here (the model cannot rename the session itself) — issue number + a short plain-language phrase naming the essence, e.g. «296 лишний запрос отмененного поиска»; then the request retold for a reader who has not seen it — the issue as a user scenario; the problem it solves. No keywords list — dropped 2026-10-08 by user decision (the title line replaced it).
+3. **Candidate approaches → divergence filter** (canon `docs/workflow/design-phase.md`): drop approaches that violate a rule the repo already fixes (name the rule); drop re-implementations of mechanisms the scout found (reuse wins); approaches differing only in internals are one approach; divergent = differs in user-visible behavior / data model / API contract / scope / reversibility; never present more than three.
 4. One approach survives → **Gate A auto-OK**: proceed to Step 2 (state the chosen approach and why in the Gate B report, even when auto-selected). ≥2 divergent → report NEEDS_APPROVAL (Gate A stop) with the approaches, trade-offs, your recommendation. Stop.
 
 ## Step 2: Design Spec + Panel (Gate B — the human gate)
@@ -286,7 +287,7 @@ Triggered by manager dispatch with the feature request (an explicitly brainstorm
    (anchor-based spot-checks via `grep '^## '` + section reads — no full re-reads).
 6. Load skill `panel-spec-review` (dispatch protocol, agent roles, aggregation rules).
 7. **Spec Panel Review** (skip for trivial specs < ~50 lines, note the skip in the report):
-   - Dispatch all 6 panelists (`spec-panel-completeness`, `spec-panel-feasibility`, `spec-panel-consistency`, `spec-panel-simplicity`, `spec-panel-best-practices`, `spec-panel-security`) in parallel — single message, 6 Task calls. Each prompt MUST contain the spec file path and instruct the panelist to read it.
+   - Dispatch all 7 panelists (`spec-panel-completeness`, `spec-panel-feasibility`, `spec-panel-consistency`, `spec-panel-simplicity`, `spec-panel-best-practices`, `spec-panel-security`, `spec-panel-test-design`) in parallel — single message, 7 Task calls. Each prompt MUST contain the spec file path and instruct the panelist to read it.
    - Follow the dispatch protocol from the `panel-spec-review` skill: spec must be self-contained, do NOT instruct panel agents to run `gh`/`webfetch`/network access.
    - Aggregate: deduplicate overlapping findings, rank BLOCKER → MAJOR → MINOR, note agreement across perspectives (agreement = stronger signal).
    - The panel never edits the spec itself — you apply any accepted fixes.
@@ -331,17 +332,11 @@ Trigger: manager resumes you with "Gate B approved". (The worktree + baseline pa
    the worktree must branch off the up-to-date main so the feature branch diff contains only
    implementation commits. No user stop.
 7. Invoke `using-git-worktrees` skill — run `./.opencode/scripts/create-worktree.sh <branch-name>` from repo root. Enter `.worktrees/<branch-name>`.
-8. CI fact-check (no local test run; main's code is CI-verified at PR time):
-   - `gh pr list --state merged --limit 10 --json number,headRefOid,statusCheckRollup,mergedAt,mergeCommit`
-     → pick the entry with the max `mergedAt` (the list is creation-ordered, not merge-ordered).
-   - Green = every check in `statusCheckRollup` has conclusion `SUCCESS`. Any FAILURE/non-success,
-     or an empty rollup → report BLOCKED (PR number, head SHA, offending checks). Do NOT fix.
-   - Staleness guard: `git log --name-only <mergeCommit>..origin/main` — if any changed file is
-     outside `docs/**`, `**.md`, `.zcode/**`, `.opencode/**`, unverified code landed on main
-     (e.g. the finishing skill's merge-locally option) → report BLOCKED with that file list.
-   - No merged PR at all → proceed with an explicit warning in the report.
-9. If the fact-check is red or stale → report BLOCKED with the facts.
-10. If green → report DONE with the plan's tasks (one line each), spec/plan paths, worktree path, branch name, fact-check result (PR number, head SHA, rollup status). Phase complete.
+8. Verify a clean baseline — mode follows the project's merge flow:
+   - **CI-gated merges (CI runs on PRs):** NO local test run. `gh pr list --state merged --limit 10 --json number,headRefOid,statusCheckRollup,mergedAt,mergeCommit` → pick the entry with max `mergedAt` (the list is creation-ordered, not merge-ordered). Green = every check in `statusCheckRollup` has conclusion `SUCCESS`; any FAILURE/non-success, or an empty rollup → the baseline is red. Staleness guard: `git log --name-only <mergeCommit>..origin/main` — if any changed file falls outside the project's docs/harness-only paths, unverified code landed on main after the verified merge → the baseline is red. No merged PR at all → proceed with an explicit warning in the report.
+   - **No CI gating:** run the project's baseline tests to verify clean state.
+9. If the baseline is red (test failure, red rollup, or stale facts) → report BLOCKED with the facts (do NOT fix).
+10. If green → report DONE with the plan's tasks (one line each), spec/plan paths, worktree path, branch name, baseline result (CI mode: PR number, head SHA, rollup status). Phase complete.
 
 ---
 
@@ -349,7 +344,7 @@ Trigger: manager resumes you with "Gate B approved". (The worktree + baseline pa
 
 Triggered by manager dispatch. Two entry variants:
 
-- **Standard:** worktree exists, CI fact-check green, plan approved (an in-container DESIGN finished Steps 1-3).
+- **Standard:** worktree exists, baseline green, plan approved (an in-container DESIGN finished Steps 1-3).
 - **Plan-only start (split mode):** the dispatch says `## Phase: IMPL (plan-only start)` and carries ONLY `## Plan: <path>` — no `## Worktree:` line. Your FIRST ACTION is **Step 0** below (worktree + baseline — the DESIGN Step 3 mechanics relocated), then continue with Step 4 as usual.
 
 ## Step 0: Worktree + Baseline (plan-only start ONLY)
@@ -358,16 +353,9 @@ Triggered by manager dispatch. Two entry variants:
 2. **Plan-vs-main sanity check:** if main advanced after Gate C (other merges landed), re-verify the plan's file paths and targets still hold on the fetched main. Material drift → report BLOCKED (return path), do NOT improvise.
 3. Invoke `using-git-worktrees` skill — run `./.opencode/scripts/create-worktree.sh <branch-name>` from repo root.
 4. Enter `.worktrees/<branch-name>`.
-5. CI fact-check (no local test run; main's code is CI-verified at PR time):
-   - `gh pr list --state merged --limit 10 --json number,headRefOid,statusCheckRollup,mergedAt,mergeCommit`
-     → pick the entry with the max `mergedAt` (the list is creation-ordered, not merge-ordered).
-   - Green = every check in `statusCheckRollup` has conclusion `SUCCESS`. Any FAILURE/non-success,
-     or an empty rollup → report BLOCKED (PR number, head SHA, offending checks). Do NOT fix.
-   - Staleness guard: `git log --name-only <mergeCommit>..origin/main` — if any changed file is
-     outside `docs/**`, `**.md`, `.zcode/**`, `.opencode/**`, unverified code landed on main
-     (e.g. the finishing skill's merge-locally option) → report BLOCKED with that file list.
-   - No merged PR at all → proceed with an explicit warning in the report.
-   - PASS → proceed to Step 4; the report carries PR number, head SHA, rollup status, staleness result.
+5. Verify a clean baseline — mode follows the project's merge flow:
+   - **CI-gated merges (CI runs on PRs):** NO local test run. `gh pr list --state merged --limit 10 --json number,headRefOid,statusCheckRollup,mergedAt,mergeCommit` → pick the entry with max `mergedAt` (the list is creation-ordered, not merge-ordered). Green = every check in `statusCheckRollup` has conclusion `SUCCESS`; any FAILURE/non-success, or an empty rollup → the baseline is red. Staleness guard: `git log --name-only <mergeCommit>..origin/main` — if any changed file falls outside the project's docs/harness-only paths, unverified code landed on main after the verified merge → the baseline is red. No merged PR at all → proceed with an explicit warning in the report.
+   - **No CI gating:** run the project's baseline tests to verify clean state. FAIL → report BLOCKED with the failure summary (do NOT fix). Green → proceed to Step 4. The CI-mode report carries the facts: PR number, head SHA, rollup status, staleness result.
 
 ## Step 4: Subagent-Driven Development Loop
 

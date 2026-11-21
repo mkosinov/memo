@@ -758,7 +758,10 @@ describe('ServiceModal — «Видно клиентам» switch (GH #606)', ()
   it('create: default submit payload carries is_public=true as a boolean', async () => {
     const { onSubmit } = renderModal({ service: null, title: 'Новая услуга' });
     changeValue(inputByLabel(/^Название/), 'Созданная');
-    changeValue(inputByLabel(/^Длительность/), '90');
+    changeValue(inputByLabel(/Длительность/), '90');
+    // GH #599 post-merge: the direction select is required — pick one so
+    // the submit is not blocked by «Обязательное поле».
+    fireEvent.change(screen.getByLabelText(/^Направление/), { target: { value: 'spec-painting' } });
     clickSave();
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
@@ -769,7 +772,9 @@ describe('ServiceModal — «Видно клиентам» switch (GH #606)', ()
   it('create: toggling off submits is_public=false as a boolean', async () => {
     const { onSubmit } = renderModal({ service: null, title: 'Новая услуга' });
     changeValue(inputByLabel(/^Название/), 'Скрытая при создании');
-    changeValue(inputByLabel(/^Длительность/), '90');
+    changeValue(inputByLabel(/Длительность/), '90');
+    // GH #599 post-merge: the direction select is required — pick one.
+    fireEvent.change(screen.getByLabelText(/^Направление/), { target: { value: 'spec-painting' } });
     fireEvent.click(screen.getByRole('switch'));
     expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
     clickSave();

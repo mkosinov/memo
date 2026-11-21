@@ -2527,6 +2527,8 @@ describe('ServiceUpdateSchema', () => {
   it('accepts is_public in the full update payload (GH #606)', () => {
     const result = ServiceUpdateSchema.parse({
       title: 'Новое название',
+      // GH #599 post-merge: specialty_id is required in the canonical PUT.
+      specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a',
       duration: 90,
       is_public: false,
     });

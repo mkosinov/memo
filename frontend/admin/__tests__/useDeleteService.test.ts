@@ -64,7 +64,7 @@ const serviceId = 'svc-1';
 const mockService: ServiceResponse = {
   id: serviceId, title: 'Картина маслом', description: '', image_url: '', specialty: '',
   min_age: 0, max_age: null, duration: 150, record_info: '',
-  tariffs: [], tags: [], materials: [], archived: false, created_at: '', updated_at: '',
+  tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '',
 };
 const otherService: ServiceResponse = { ...mockService, id: 'svc-2', title: 'Гончарное дело' };
 

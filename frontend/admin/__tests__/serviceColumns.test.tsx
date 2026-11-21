@@ -5,7 +5,8 @@
  * material TITLES only (the note ?? description fallback governs the web
  * text block, NOT badges), em dash when a service has no links. Also pins
  * the column shape: materials sits after age, non-sortable; the retired
- * material_hint column is removed by #223 Task 13.
+ * material_hint column is removed by #223 Task 13. GH #606 adds the
+ * «Не в web» badge in the title cell (mirror of the #601 locations badge).
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -30,6 +31,7 @@ function makeService(overrides: Partial<ServiceResponse> = {}): ServiceResponse 
     tariffs: [],
     tags: [],
     materials: [],
+    is_public: true, // GH #606: web-visibility flag — true = shown on the site
     archived: false,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -86,5 +88,29 @@ describe('serviceColumns — materials badges cell (GH #223 Task 3, spec §8)', 
 
     expect(screen.queryByTestId('material-badge')).not.toBeInTheDocument();
     expect(screen.getByText('—')).toBeInTheDocument();
+  });
+});
+
+// ─── «Не в web» badge (GH #606 — mirror of the #601 locations badge) ───────
+
+describe('serviceColumns — «Не в web» badge (GH #606)', () => {
+  it('hidden service (is_public=false): badge next to the title', () => {
+    const { container } = renderCell('title', makeService({ is_public: false }));
+    const badge = container.querySelector('[data-testid="service-web-hidden-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toBe('Не в web');
+    // The title itself stays the cell's primary content.
+    expect(container.textContent).toContain('Рисование акварелью');
+  });
+
+  it('visible service (is_public=true): no badge', () => {
+    const { container } = renderCell('title', makeService({ is_public: true }));
+    expect(container.querySelector('[data-testid="service-web-hidden-badge"]')).toBeNull();
+  });
+
+  it('hidden ≠ archived: an is_public=false service may be unarchived and vice versa', () => {
+    // Both negative flags can coexist; the badge renders regardless of archive state.
+    const { container } = renderCell('title', makeService({ is_public: false, archived: true }));
+    expect(container.querySelector('[data-testid="service-web-hidden-badge"]')).not.toBeNull();
   });
 });

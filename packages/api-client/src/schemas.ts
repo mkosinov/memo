@@ -379,6 +379,10 @@ export const ServiceResponseSchema = z.object({
   tariffs: z.array(TariffResponseSchema),
   tags: z.array(TagResponseSchema),
   materials: z.array(ServiceMaterialItemSchema).default([]),
+  // GH #606: web-visibility flag — true = shown on the client site, false =
+  // hidden from the site only (fully working in admin). NOT NULL column,
+  // always serialized. Distinct from `archived`.
+  is_public: z.boolean(),
   archived: z.boolean(), // inverted: archived = true means the service is in the archive (#207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -788,6 +792,10 @@ export const ServiceCreateSchema = z.object({
   tariffs: z.array(TariffCreateSchema).default([]),
   tag_ids: z.array(z.string()).default([]),
   materials: z.array(ServiceMaterialLinkSchema).default([]),
+  // GH #606: web visibility — absent → true (visible). Mirrors backend
+  // ServiceBase default; Update (.strict() below) carries the full PUT
+  // contract, patchService uses Partial<ServiceUpdate>.
+  is_public: z.boolean().optional().default(true),
 });
 
 export type ServiceCreate = z.infer<typeof ServiceCreateSchema>;

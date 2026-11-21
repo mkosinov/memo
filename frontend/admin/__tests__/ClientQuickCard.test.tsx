@@ -56,6 +56,7 @@ const service1: ServiceResponse = {
   tariffs: [],
   tags: [],
   materials: [],
+  is_public: true,
   archived: false,
   created_at: '',
   updated_at: '',

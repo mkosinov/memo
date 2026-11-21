@@ -220,6 +220,36 @@ function FieldRenderer({ field, value, onChange, error, selectAriaLabel }: Field
       );
     }
 
+    // GH #606 (mirror of #601): switch button verbatim from ActivityForm
+    // `toggle-private` — role="switch" + aria-checked, direct binding
+    // (checked = value).
+    case 'boolean': {
+      const checked = Boolean(value);
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <button
+            id={inputId}
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            onClick={() => onChange(field.key, !checked)}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              checked ? 'bg-brand' : 'bg-ink-faint'
+            }`}
+            data-testid={field.testId ?? `toggle-${field.key}`}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                checked ? 'translate-x-4' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+          {errorEl}
+        </div>
+      );
+    }
+
     default:
       return null;
   }
@@ -519,11 +549,16 @@ export function ServiceModal({
       }
       initial[f.key] =
         service?.[f.key] ??
-        (f.type === 'number'
-          ? DEFAULT_EMPTY_NUMBER_KEYS.includes(f.key)
-            ? ''
-            : 0
-          : '');
+        (f.type === 'boolean'
+          ? // GH #606 (mirror of #601): nullish fallback — a boolean field
+            // defaults to `true`, NOT the non-number empty string ('' would
+            // leave the switch as a string and 422 the strict payload).
+            true
+          : f.type === 'number'
+            ? DEFAULT_EMPTY_NUMBER_KEYS.includes(f.key)
+              ? ''
+              : 0
+            : '');
     });
     return initial;
   });

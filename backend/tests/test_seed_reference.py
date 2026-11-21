@@ -4,6 +4,36 @@ GH #601 Task 6: the loader must accept and APPLY the location web-visibility
 flag ``is_public`` — both polarities, on create AND on the natural-key re-run
 (in-place update). A field that is parsed but silently dropped from the
 apply whitelist must turn these tests red.
+
+Spec §6 test map — items №1–№3 (issue #612 Task 1 DoD):
+
+№1 sections & assembly — ``test_shipped_csv_template_checks_and_has_linked_specialties``
+(all sections load), ``test_each_required_section_is_mandatory``,
+``test_tags_section_present_collects_tags`` / ``..._optional_and_absence_...``,
+``test_service_children_nest_by_service_title``,
+``test_staff_row_without_master_columns_has_no_master_block``,
+``test_partial_master_fill_reports_staff_line``,
+``test_master_block_requires_specialty_and_color`` (D5).
+
+№2 typing — ``test_service_children_nest_by_service_title`` (int ok + audience
+``kid``), ``test_bad_integer_reports_starting_csv_line``,
+``test_non_numeric_integer_columns_fail``, ``test_blank_required_integer_columns_fail``,
+``test_blank_optional_numeric_columns_become_none``, bool polarities
+``test_load_accepts_is_public_both_polarities`` +
+``test_boolean_literals_parse_case_insensitive`` / ``test_non_boolean_literal_fails_with_line``
+/ ``test_empty_required_boolean_and_audience_are_rejected``, audience invalid —
+``test_tariff_audience_invalid_value_russian_error``; quoted ``;`` → positions
+assert in the template test.
+
+№3 file mechanics — ``test_csv_bom_crlf_and_case_insensitive_specialty_refs``
+(BOM + CRLF branch; every other test runs the no-BOM/LF branch),
+``test_blank_separator_lines_are_skipped``,
+``test_trailing_empty_header_columns_match_empty_data_cells``,
+``test_duplicate_section_marker_fails_with_line``,
+``test_unknown_section_and_duplicate_header_report_csv_lines``,
+``test_marker_with_non_empty_tail_fails_with_line``,
+``test_unclosed_quoted_cell_reports_record_start``,
+``test_multiline_quoted_field_error_cites_record_start``.
 """
 
 from __future__ import annotations
@@ -17,8 +47,11 @@ from sqlalchemy import select
 from src.db.base import Base
 from src.db.database import DBManager
 from src.models import Location, Position
+from src.models.enums import TariffAudience
 from src.seed.reference import (
+    CSV_SECTIONS,
     DEFAULT_CSV,
+    REQUIRED_SECTIONS,
     SPECIALTY_MAX,
     SeedDataError,
     Summary,
@@ -167,11 +200,13 @@ def test_tags_section_is_optional_and_absence_clears_tag_lists(csv_path: Path) -
 def test_blank_optional_numeric_columns_become_none(csv_path: Path) -> None:
     text = csv_path.read_text(encoding="utf-8")
     text = text.replace(";Алексей;Примеров;0;;", ";Алексей;Примеров;;;")
+    text = text.replace(";0;пример;True", ";;пример;True")
     csv_path.write_text(text, encoding="utf-8")
 
     data = load_reference_data(csv_path)
     assert data.services[0].max_age is None
     assert data.staff[0].sort_order is None
+    assert data.locations[0].sort_order is None
 
 
 def test_empty_required_boolean_and_audience_are_rejected(csv_path: Path) -> None:
@@ -420,3 +455,254 @@ def test_services_is_public_column_is_extra_and_ignored(
     data = load_reference_data(csv_path)
     assert data.services[0].is_public is True
     assert "лишняя колонка services.is_public" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 items №1–№3 completion (issue #612 Task 1.3): section assembly,
+# source-side typing, file mechanics. Test map lives in the module docstring.
+# ---------------------------------------------------------------------------
+
+
+def _drop_section(text: str, name: str) -> str:
+    """Remove one whole section block (marker line through the line before
+    the next marker/EOF) — the missing-section test's mutation."""
+    kept: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        if line.strip() in CSV_SECTIONS:
+            skipping = line.strip() == name
+            if skipping:
+                continue
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept) + "\n"
+
+
+@pytest.mark.parametrize("section", sorted(REQUIRED_SECTIONS))
+def test_each_required_section_is_mandatory(csv_path: Path, section: str) -> None:
+    """Spec §6 №1: any of the eight required sections absent → load error
+    naming exactly that section."""
+    csv_path.write_text(_drop_section(csv_path.read_text(encoding="utf-8"), section))
+    with pytest.raises(
+        SeedDataError, match=rf"строка \d+: отсутствуют обязательные секции: {section}$"
+    ):
+        load_reference_data(csv_path)
+
+
+def test_tags_section_present_collects_tags() -> None:
+    """Spec §6 №1: with the optional ``tags`` section present, the dictionary
+    is collected and tag columns assemble into entity tag lists."""
+    data = load_reference_data(DEFAULT_CSV)
+    assert data.tags == ["пример"]
+    assert data.locations[0].tags == ["пример"]
+    assert data.services[0].tags == ["пример"]
+    assert data.staff[0].master is not None
+    assert data.staff[0].master.tags == ["пример"]
+
+
+def test_service_children_nest_by_service_title(csv_path: Path) -> None:
+    """Spec §6 №1: service_materials/tariffs rows nest under the service with
+    the matching ``service_title`` — and only under it."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример\n"
+        ";Керамика для примера;Вторая услуга;;Моделирование;6;;60;;",
+    )
+    text = text.replace(
+        ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
+        ";Линогравюра для примера;Учебный материал;Для демонстрации связи\n"
+        ";Керамика для примера;Учебный материал;",
+    )
+    text = text.replace(
+        ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all",
+        ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all\n"
+        ";Керамика для примера;Льготный;Тариф второй услуги;500;kid",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    by_title = {service.title: service for service in data.services}
+    assert set(by_title) == {"Линогравюра для примера", "Керамика для примера"}
+
+    linogravure = by_title["Линогравюра для примера"]
+    assert [item.title for item in linogravure.materials] == ["Учебный материал"]
+    assert [item.title for item in linogravure.tariffs] == ["Обычный"]
+
+    ceramics = by_title["Керамика для примера"]
+    assert (ceramics.min_age, ceramics.duration) == (6, 60)
+    assert [item.title for item in ceramics.materials] == ["Учебный материал"]
+    assert [item.title for item in ceramics.tariffs] == ["Льготный"]
+    assert ceramics.tariffs[0].price == 500
+    assert ceramics.tariffs[0].audience == TariffAudience.KID
+
+
+def test_staff_row_without_master_columns_has_no_master_block(csv_path: Path) -> None:
+    """Spec §6 №1 / §4.3: every master_* cell empty → no block is assembled
+    and the staff person still parses."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ';Алексей;Примеров;0;;"Мастер;Администратор";"Графика;Моделирование";#456789;True;пример',
+            ';Алексей;Примеров;0;;"Мастер;Администратор";;;;',
+        ),
+        encoding="utf-8",
+    )
+
+    data = load_reference_data(csv_path)
+    assert data.staff[0].master is None
+    assert data.staff[0].positions == ["Мастер", "Администратор"]
+
+
+def test_partial_master_fill_reports_staff_line(csv_path: Path) -> None:
+    """Spec §6 №1 / §4.3: partial master_* fill is an explicit error with the
+    record's line — both directions plus a tags-only fragment."""
+    full = csv_path.read_text(encoding="utf-8")
+
+    csv_path.write_text(full.replace(";#456789;True;пример", ";;True;пример"))
+    with pytest.raises(SeedDataError, match=r"строка 23 .*master_color обязателен"):
+        load_reference_data(csv_path)
+
+    csv_path.write_text(
+        full.replace('"Графика;Моделирование";#456789;True;пример', '"";;;пример'),
+        encoding="utf-8",
+    )
+    with pytest.raises(SeedDataError, match=r"строка 23 .*master_specialty обязателен"):
+        load_reference_data(csv_path)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "section", "column", "line"),
+    [
+        ("Учебный адрес, 1;;12;", "Учебный адрес, 1;;;", "locations", "capacity", 3),
+        (";Графика;8;;90;", ";Графика;;;90;", "services", "min_age", 7),
+        (";Графика;8;;90;", ";Графика;8;;;", "services", "duration", 7),
+        (
+            ";Демонстрационный тариф;1000;all",
+            ";Демонстрационный тариф;;all",
+            "tariffs",
+            "price",
+            19,
+        ),
+    ],
+)
+def test_blank_required_integer_columns_fail(
+    csv_path: Path,
+    original: str,
+    replacement: str,
+    section: str,
+    column: str,
+    line: int,
+) -> None:
+    """Spec §6 №2 / §4.4: capacity/min_age/duration/price never degrade to 0
+    or null — an empty cell is a load error with the record line."""
+    text = csv_path.read_text(encoding="utf-8")
+    assert original in text
+    csv_path.write_text(text.replace(original, replacement), encoding="utf-8")
+
+    with pytest.raises(
+        SeedDataError,
+        match=rf"строка {line} \({section}\): колонка {column} должна содержать целое число",
+    ):
+        load_reference_data(csv_path)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "section", "column", "line"),
+    [
+        (
+            "Учебный адрес, 1;;12;",
+            "Учебный адрес, 1;;двенадцать;",
+            "locations",
+            "capacity",
+            3,
+        ),
+        (
+            ";Демонстрационный тариф;1000;all",
+            ";Демонстрационный тариф;1000р;all",
+            "tariffs",
+            "price",
+            19,
+        ),
+    ],
+)
+def test_non_numeric_integer_columns_fail(
+    csv_path: Path,
+    original: str,
+    replacement: str,
+    section: str,
+    column: str,
+    line: int,
+) -> None:
+    """Spec §6 №2 / §4.4: a non-numeric cell in ANY integer column (not just
+    min_age) is a load error with the record line."""
+    text = csv_path.read_text(encoding="utf-8")
+    assert original in text
+    csv_path.write_text(text.replace(original, replacement), encoding="utf-8")
+
+    with pytest.raises(
+        SeedDataError,
+        match=rf"строка {line} \({section}\): в колонке {column} ожидалось целое число",
+    ):
+        load_reference_data(csv_path)
+
+
+def test_boolean_literals_parse_case_insensitive(csv_path: Path) -> None:
+    """Spec §6 №2 / §4.4: True/False literals parse in any case, both bool
+    columns, both polarities."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";0;пример;True", ";0;пример;TRUE")
+    text = text.replace(";#456789;True;пример", ";#456789;fAlSe;пример")
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert data.locations[0].is_public is True
+    assert data.staff[0].master is not None
+    assert data.staff[0].master.is_active is False
+
+
+def test_non_boolean_literal_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №2 / §4.4: anything but True/False (case-insensitive) in a
+    bool column is a load error with the record line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace(";0;пример;True", ";0;пример;да"), encoding="utf-8")
+
+    with pytest.raises(SeedDataError, match=r"строка 3 .*is_public ожидалось True или False"):
+        load_reference_data(csv_path)
+
+
+def test_blank_separator_lines_are_skipped(csv_path: Path) -> None:
+    """Spec §6 №3: fully blank rows — mid-section, doubled, or between
+    sections — are skipped without corrupting the parsed rows."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";Мастер\n", ";Мастер\n\n")
+    text = text.replace(";Администратор\n", ";Администратор\n\n\n")
+    text = text.replace("\nstaff\n", "\n\n\nstaff\n")
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert [item.title for item in data.positions] == ["Мастер", "Администратор"]
+    assert data.staff[0].master is not None
+
+
+def test_duplicate_section_marker_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №3 / §4.1: a second marker of an already-seen section is a
+    load error citing the duplicate marker's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace("\ntags\n", "\nmaterials\n;title\n;Дополнительный материал\n\ntags\n"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SeedDataError, match=r"строка 30: секция materials повторяется"):
+        load_reference_data(csv_path)
+
+
+def test_marker_with_non_empty_tail_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №3 / §4.1: a marker row with a non-empty tail cell is NOT a
+    marker — the row errors with its own line number."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("\nmaterials\n", "\nmaterials;примечание\n"), encoding="utf-8")
+
+    with pytest.raises(SeedDataError, match=r"строка 9 .*первая колонка должна быть пустой"):
+        load_reference_data(csv_path)

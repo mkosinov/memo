@@ -27,14 +27,17 @@ import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
 const BACKEND = resolveBackendUrl();
 
-/** The canonical seed staff cards (= former masters) by business keys. */
+/** The canonical seed staff cards (= former masters) by business keys.
+ *  GH #599: `specialty` below is the DISPLAY string — canonical dictionary
+ *  titles joined «, » alphabetical (Анастасия П. holds BOTH directions in
+ *  the #599 seed; the legacy lowercase CSV is gone). */
 const SEED_STAFF = [
-  { first_name: 'Ольга', last_name: 'Середа', specialty: 'живопись', color: '#5B8C7A' },
-  { first_name: 'Юлия', last_name: 'Большакова', specialty: 'керамика', color: '#6B7E9C' },
-  { first_name: 'Анастасия', last_name: 'П.', specialty: 'живопись', color: '#A07060' },
-  { first_name: 'Дарья', last_name: 'Тюльпина', specialty: 'керамика', color: '#7A6E9C' },
-  { first_name: 'Александра', last_name: 'В.', specialty: 'живопись', color: '#8A7840' },
-  { first_name: 'Ирина', last_name: 'Горох', specialty: 'керамика', color: '#9A5870' },
+  { first_name: 'Ольга', last_name: 'Середа', specialty: 'Живопись', color: '#5B8C7A' },
+  { first_name: 'Юлия', last_name: 'Большакова', specialty: 'Керамика', color: '#6B7E9C' },
+  { first_name: 'Анастасия', last_name: 'П.', specialty: 'Живопись, Керамика', color: '#A07060' },
+  { first_name: 'Дарья', last_name: 'Тюльпина', specialty: 'Керамика', color: '#7A6E9C' },
+  { first_name: 'Александра', last_name: 'В.', specialty: 'Живопись', color: '#8A7840' },
+  { first_name: 'Ирина', last_name: 'Горох', specialty: 'Керамика', color: '#9A5870' },
 ] as const;
 
 /** Fixed reference week Monday 10:00 slot (Морской пейзаж, m1) — the

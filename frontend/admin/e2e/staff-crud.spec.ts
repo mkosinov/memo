@@ -2,6 +2,7 @@ import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { waitForStaffReady } from './fixtures/helpers';
 import { createTestMaster, cleanup } from './fixtures/factories';
+import { seedId } from './fixtures/seed-ids';
 
 /**
  * E2E tests for the Staff directory page (GH #266 «Сотрудники», the former
@@ -208,11 +209,15 @@ test.describe('Staff — Create Modal', () => {
     await expect(dialog.locator('[data-testid="position-checkbox-smm"]')).toBeVisible();
 
     // «Сделать мастером» section toggle (D6) — off by default; checking it
-    // reveals specialty + color.
+    // reveals directions + color. GH #599: the free-text specialty input is
+    // GONE — «Направления *» renders dictionary CHECKBOXES (seed «Живопись»).
     const masterToggle = dialog.locator('[data-testid="master-section-checkbox"]');
     await expect(masterToggle).not.toBeChecked();
     await masterToggle.check();
-    await expect(dialog.getByText('Специальность *')).toBeVisible();
+    await expect(dialog.getByText('Направления *')).toBeVisible();
+    await expect(
+      dialog.locator(`[data-testid="specialty-checkbox-${seedId('specialties', 'title', 'Живопись')}"]`),
+    ).toBeVisible();
     await expect(dialog.getByText('Цвет *')).toBeVisible();
 
     // «Создать учётку» section toggle (D6) — off by default; checking it
@@ -263,6 +268,9 @@ test.describe('Staff — Edit via Row Click', () => {
   });
 
   test('edit modal shows the master section + schedule-archive toggle for a master card', async ({ page, request }) => {
+    // GH #599: the factory creates «тест-специальность» in the dictionary
+    // (POST /specialties) and links the card to it — the edit modal prefills
+    // directions as CHECKED dictionary checkboxes, not free text.
     const master = await createTestMaster(request, { specialty: 'тест-специальность', color: '#ABCDEF' });
     try {
       await waitForStaffReady(page);
@@ -272,7 +280,11 @@ test.describe('Staff — Edit via Row Click', () => {
       await expect(dialog).toBeVisible({ timeout: 5000 });
       // The section exists → toggle checked, fields pre-filled from the card.
       await expect(dialog.locator('[data-testid="master-section-checkbox"]')).toBeChecked();
-      await expect(dialog.locator('input[placeholder="живопись, керамика"]')).toHaveValue('тест-специальность');
+      const specialtyId = master.master!.specialty_ids[0];
+      await expect(
+        dialog.locator(`[data-testid="specialty-checkbox-${specialtyId}"]`),
+      ).toBeChecked();
+      await expect(dialog.getByText('тест-специальность')).toBeVisible();
       await expect(dialog.locator('input[placeholder="#5B8C7A"]')).toHaveValue('#ABCDEF');
       // Edit-only: the schedule-archive toggle (D5 «архив мастера»).
       const archivedToggle = dialog.locator('[data-testid="master-archived-checkbox"]');

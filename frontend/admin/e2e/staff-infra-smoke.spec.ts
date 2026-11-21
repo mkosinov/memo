@@ -76,11 +76,13 @@ test.describe('GH #266 T7 — staff e2e infrastructure smoke', () => {
     });
     expect(staffA.id).toBeTruthy();
 
-    // VERIFY API — GET /staff/{id} reflects the composite card.
+    // VERIFY API — GET /staff/{id} reflects the composite card. GH #599:
+    // master.specialty is the DISPLAY string — canonical dictionary titles
+    // joined «, » alphabetical («керамика» → «Керамика»).
     const getA = await request.get(`${BACKEND}/api/v1/staff/${staffA.id}`);
     expect(getA.status()).toBe(200);
     const bodyA = await getA.json();
-    expect(bodyA.master).toMatchObject({ specialty: 'керамика', color: '#123456' });
+    expect(bodyA.master).toMatchObject({ specialty: 'Керамика', color: '#123456' });
     expect(bodyA.position_ids).toEqual(['master']);
     expect(bodyA.archived).toBe(false);
 
@@ -89,10 +91,15 @@ test.describe('GH #266 T7 — staff e2e infrastructure smoke', () => {
     expect(allMasters.map((m: { id: string }) => m.id)).toContain(staffA.id);
 
     // VERIFY DB — one row in each of the 4 restructured tables + the account.
+    // GH #599: the masters extension carries color only; the directions live
+    // in the staff_specialties M2M, linked to the resolved dictionary id.
     expect(queryDBRow(`SELECT id FROM staff WHERE id='${staffA.id}'`)).not.toBeNull();
     expect(queryDBRow(
-      `SELECT staff_id, specialty, color FROM masters WHERE staff_id='${staffA.id}'`,
-    )).toMatchObject({ specialty: 'керамика', color: '#123456' });
+      `SELECT color FROM masters WHERE staff_id='${staffA.id}'`,
+    )).toMatchObject({ color: '#123456' });
+    expect(queryDBRows(
+      `SELECT specialty_id FROM staff_specialties WHERE staff_id='${staffA.id}'`,
+    )).toEqual([{ specialty_id: bodyA.master.specialty_ids[0] }]);
     expect(queryDBRows(
       `SELECT * FROM staff_positions WHERE staff_id='${staffA.id}' AND position_id='master'`,
     )).toHaveLength(1);

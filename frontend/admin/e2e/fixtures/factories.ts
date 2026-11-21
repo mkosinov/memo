@@ -190,9 +190,9 @@ export interface StaffOverrides {
   sort_order?: number;
   /** Master section (D5): present → the card is an acting schedule master.
    *  GH #599: the wire speaks `specialty_ids` (dictionary UUIDs); the legacy
-   *  `specialty` title string (single or CSV, case-insensitive against the
-   *  seed dictionary «Живопись»/«Керамика»/«Декор») is still accepted and
-   *  resolved — legacy call shapes keep working unchanged. */
+   *  `specialty` title string (single or CSV, case-insensitive) resolves
+   *  through the dictionary, and an unknown title is CREATED there first
+   *  (see resolveSpecialtyIds) — legacy call shapes keep working. */
   master?: { specialty?: string; specialty_ids?: string[]; color: string } | null;
   /** Position ids (M2M staff_positions); seed dictionary: master/admin/smm. */
   positions?: string[];
@@ -203,8 +203,10 @@ export interface StaffOverrides {
 /**
  * GH #599: resolve specialty TITLES into dictionary ids via the bare
  * /specialties/all list (fixed server order title ASC). Case-insensitive
- * (the reference-loader contract); an unknown title is a LOUD error — a
- * stale fixture title must fail fast, not 422 downstream.
+ * (the reference-loader contract); an unknown title is CREATED in the
+ * dictionary first (POST /api/v1/specialties — legacy fixture titles like
+ * «тест-специальность» keep working; the per-test seed reset wipes the
+ * entry with the rest of the table, so nothing accumulates).
  */
 async function resolveSpecialtyIds(
   api: APIRequestContext,
@@ -214,15 +216,24 @@ async function resolveSpecialtyIds(
   expect(resp.ok(), "resolveSpecialtyIds: GET /specialties/all").toBeTruthy();
   const all = (await resp.json()) as { id: string; title: string }[];
   const byLower = new Map(all.map((s) => [s.title.toLowerCase(), s.id]));
-  return titles.map((title) => {
-    const id = byLower.get(title.trim().toLowerCase());
-    if (!id) {
-      throw new Error(
-        `factories: specialty «${title}» not found in /specialties/all (seed: Живопись/Керамика/Декор)`,
-      );
+  const ids: string[] = [];
+  for (const title of titles) {
+    const trimmed = title.trim();
+    const existing = byLower.get(trimmed.toLowerCase());
+    if (existing) {
+      ids.push(existing);
+      continue;
     }
-    return id;
-  });
+    const created = await api.post(`${BACKEND}/api/v1/specialties`, {
+      data: { title: trimmed },
+    });
+    expect(
+      created.ok(),
+      `resolveSpecialtyIds: create specialty «${trimmed}» via POST /specialties`,
+    ).toBeTruthy();
+    ids.push(((await created.json()) as { id: string }).id);
+  }
+  return ids;
 }
 
 /**

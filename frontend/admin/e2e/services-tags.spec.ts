@@ -278,6 +278,9 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
     await expect(dialog).toBeVisible({ timeout: 10_000 });
     await titleInput(dialog).fill(TITLE);
     await durationInput(dialog).fill('90');
+    // GH #599: «Направление» is a REQUIRED dictionary select on create —
+    // the submit stays blocked until a direction is chosen (any seed one).
+    await dialog.getByLabel(/^Направление/).selectOption({ label: 'Живопись' });
     await addTagViaSearch(page, dialog, 'новин', TAG_TITLES.news);
     await dialog.getByText('Сохранить').click();
     await waitForToast(page, 'Услуга создана');

@@ -41,13 +41,18 @@ const COLOR = '#4A7C59';
 
 test.describe('S4 — activity creation lists acting masters only', () => {
   test('an archived master section leaves every creation list; POST is rejected', async ({ page, request }) => {
-    // 1. SETUP — a staff card WITH an acting master section.
+    // 1. SETUP — a staff card WITH an acting master section. The factory
+    // creates «S4-специальность» in the dictionary and links the card to
+    // it; the section's direction id rides the response (the PATCH/PUT
+    // master block speaks `specialty_ids` — the legacy `specialty` title
+    // key is extra-forbidden on the wire since #599).
     const staff = await createTestStaff(request, {
       first_name: 'Действующий',
       last_name: `Вархивнов${Date.now()}`,
       master: { specialty: SPECIALTY, color: COLOR },
       positions: ['master'],
     });
+    const specialtyIds: string[] = staff.master.specialty_ids;
 
     let activityId: string | undefined;
     try {
@@ -60,9 +65,10 @@ test.describe('S4 — activity creation lists acting masters only', () => {
       await openStampMasterPickerAndExpect(page, staff.id, 'visible');
 
       // 2. ACTION — archive the master section (Gap A flag, D7: row KEPT).
+      // GH #599: the wire block is {specialty_ids, color, archived}.
       const patch = await request.patch(`${BACKEND}/api/v1/staff/${staff.id}`, {
         data: {
-          master: { specialty: SPECIALTY, color: COLOR, archived: true },
+          master: { specialty_ids: specialtyIds, color: COLOR, archived: true },
         },
       });
       expect(patch.status()).toBe(200);
@@ -116,7 +122,7 @@ test.describe('S4 — activity creation lists acting masters only', () => {
       //    creation list and an activity can be created again.
       const restore = await request.patch(`${BACKEND}/api/v1/staff/${staff.id}`, {
         data: {
-          master: { specialty: SPECIALTY, color: COLOR, archived: false },
+          master: { specialty_ids: specialtyIds, color: COLOR, archived: false },
         },
       });
       expect(restore.status()).toBe(200);

@@ -6,7 +6,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
-from sqlalchemy import delete, not_, select
+from sqlalchemy import asc, delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import contains_eager, joinedload, selectinload
 
@@ -27,6 +27,9 @@ from src.schemas.service import (
     ServiceCreate,
     ServiceMaterialLinkIn,
     ServicePatch,
+    ServicePublicMaterial,
+    ServicePublicResponse,
+    ServicePublicTariff,
     ServiceResponse,
     ServiceUpdate,
     TariffUpdate,
@@ -48,7 +51,9 @@ if TYPE_CHECKING:
 # children (never journaled, §4.2). GH #599: ``specialty_id`` — the
 # journaled scalar is the reference (the display title lives in the
 # dictionary; reading it off the relationship here would lazy-load
-# under async SQLAlchemy).
+# under async SQLAlchemy). GH #606: ``is_public`` joins the
+# list — a visibility toggle writes an audit line, and a flag-only PUT
+# is not an empty diff (spec §3.6).
 _SERVICE_MARK_FIELDS = (
     "title",
     "description",
@@ -58,6 +63,7 @@ _SERVICE_MARK_FIELDS = (
     "max_age",
     "duration",
     "record_info",
+    "is_public",
 )
 
 
@@ -113,7 +119,9 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
     # FK, so the PATCH strip set carries it. The explicit-null case never
     # reaches this strip: the ``ServicePatch`` schema validator rejects
     # it with 422 (обнуление невозможно — spec §4.3).
-    NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty_id", "min_age", "duration", "record_info"}
+    # GH #606: is_public is NOT NULL — a PATCH null means 'don't change'
+    # (mirror of LocationService, #601).
+    NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty_id", "min_age", "duration", "record_info", "is_public"}
 
     # GH #212 search matrix (spec §5.2): substring on title/description
     # (each field ilike'd separately), exact id equality when q parses as
@@ -599,3 +607,85 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
 def get_service_service() -> ServiceService:
     """Returns a singleton ServiceService."""
     return ServiceService(get_archive_repository(), Service)
+
+
+async def list_public_services_view(
+    db_session: AsyncSession,
+) -> list[ServicePublicResponse]:
+    """``/api/v1/public/services`` anonymous dictionary (ADR-015, #606).
+
+    Modeled on ``list_public_locations_view`` (the #601 precedent) with
+    the eager-load half taken from ``ServiceService.list_all`` (spec
+    §3.2): the public schema NESTS tariffs/tags/materials, so the
+    statement carries the same ``selectinload`` options — a naive copy
+    of the locations view would crash under async SQLAlchemy with
+    ``MissingGreenlet`` on the first lazy load. FORCED visibility: only
+    rows that are BOTH active (``is_active``) and shown on the site
+    (``is_public``, NOT NULL since the #606 flag — the #601 mirror)
+    leave the server. The shared ``ServiceService.list`` / ``list_all``
+    are NOT touched (the admin grid rides them — hidden stays fully
+    working inside the admin).
+
+    Item assembly is an EXPLICIT mapper (the ``MyPhotoItem`` /
+    ``PhotoPublicResponse`` #493 precedent), never ``model_validate``
+    over the ORM object: pydantic will not turn a ``Tag`` into ``str``,
+    so tags are built as ``sorted(tag.title)`` strings server-side.
+    Materials keep the staff-contract order ``title ASC, id ASC``;
+    tariffs inherit the relationship order (no separate ``order_by``
+    there either). Nested rows have no archive path of their own — they
+    travel exactly as the staff contract shows them (spec §3.2
+    invariant).
+
+    Bare array canon of ``/all`` (spec §3.2): no parameters, no
+    envelope, pinned order ``title ASC, id ASC`` (the staff-list order
+    without explicit ``sort_by``), the ``BARE_LIST_MAX_ROWS`` ceiling
+    via the same LIMIT+1 probe (the 1001st row raises
+    ``BareListLimitExceededError`` → 422 in the router).
+    """
+
+    def _public_material(sm: ServiceMaterial) -> ServicePublicMaterial:
+        return ServicePublicMaterial(
+            title=sm.material.title,
+            description=sm.material.description,
+            note=sm.note,
+        )
+
+    def _public_item(service: Service) -> ServicePublicResponse:
+        return ServicePublicResponse(
+            id=service.id,
+            title=service.title,
+            description=service.description,
+            image_url=service.image_url,
+            specialty=service.specialty,
+            min_age=service.min_age,
+            max_age=service.max_age,
+            tariffs=[
+                ServicePublicTariff(id=t.id, title=t.title, price=t.price)
+                for t in service.tariffs
+            ],
+            materials=[
+                _public_material(sm)
+                for sm in sorted(
+                    service.service_materials,
+                    key=lambda sm: (sm.material.title, sm.material.id),
+                )
+            ],
+            tags=sorted(tag.title for tag in service.tags),
+        )
+
+    stmt = (
+        select(Service)
+        .where(Service.is_active.is_(True), Service.is_public.is_(True))
+        .options(
+            selectinload(Service.tariffs),
+            selectinload(Service.tags),
+            selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
+        )
+        .order_by(asc(Service.title), asc(Service.id))
+        .limit(BARE_LIST_MAX_ROWS + 1)
+    )
+    result = await db_session.execute(stmt)
+    rows = list(result.scalars().all())
+    if len(rows) > BARE_LIST_MAX_ROWS:
+        raise BareListLimitExceededError(Service.__tablename__, BARE_LIST_MAX_ROWS)
+    return [_public_item(service) for service in rows]

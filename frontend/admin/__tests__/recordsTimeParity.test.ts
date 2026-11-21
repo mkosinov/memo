@@ -49,6 +49,7 @@ const mockService: ServiceResponse = {
   tariffs: [{ id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500, audience: 'adult' }],
   tags: [{ id: 'tag1', title: 'глина' }],
   materials: [],
+  is_public: true,
   archived: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',

@@ -10,6 +10,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-11-21
 
 ### Added
+- **GH #606 — Волна ADR-015 (словари): витринные справочники
+  `/public/masters` + `/public/services`, гарды 5 bare GET словарей,
+  флаг видимости услуг `is_public`, миграция веб-формы записи** —
+  branch `606-adr015-dictionaries` (8 задач, 15 коммитов
+  `94a28a9f..8a9aa085`, base `923ad95e` = main; 67 файлов, +3265/−217;
+  спека `docs/specs/2026-11-13-adr015-dictionaries-606-design.md`
+  рев.4, план `docs/plans/2026-11-14-adr015-dictionaries-606-plan.md`
+  8/8 — оба на main, unchanged by IMPL):
+  - **Флаг `is_public` услуги (T1 `94a28a9f`+`d3426753`):** зеркало
+    #601 для локаций — миграция `d4f6a8b0c2e1`
+    (`services.is_public` NOT NULL DEFAULT true), модель, staff-контракт
+    (`ServiceBase.is_public` — наследуется Create/Update/Response;
+    `ServicePatch.is_public: bool | None` отдельной строкой, канон
+    записи #601), аудит услуг, NOT_NULL_FIELDS, сид-полярности
+    в `seed-data/services.yaml`.
+  - **Витринные справочники (T2 `42062198`+`c07e82ca`):**
+    `GET /api/v1/public/masters` — только действующие мастера
+    (`is_active`), минимальная 5-поле схема `MasterPublicResponse`;
+    `GET /api/v1/public/services` — только активные с `is_public = true`,
+    схема `ServicePublicResponse`: поля формы записи + поля деталей
+    (`description`, `min_age`, `max_age` — единственный nullable
+    скаляр) + `specialty`, вложенные тарифы/материалы, теги как
+    отсортированные строки-заголовки; поля деталей едут «транспортом»
+    под будущий экран деталей услуги — показ в текущем UI не строится
+    (решение владельца, вариант 2); обе записи в allowlist
+    `PUBLIC_ROUTES`.
+  - **Гарды bare GET (T3 `c5243d99`+`9b6e235a`, фикс `4699a2f8`):**
+    `GET /masters` → `masters:read`, `GET /services[/id]` →
+    `services:read`, `GET /tags[/id]` → `tags:read` — аноним и
+    клиентская сессия → 401; 5 записей вычищены из `PUBLIC_ROUTES`
+    (последний анонимный bare словарь — теги — закрыт; собственной
+    витрины у тегов нет — заголовки едут вложенными в витрину услуг);
+    витринные маршруты внесены в `_PUBLIC_GETS` scope-контракта +
+    зеркала докстрингов (`4699a2f8`).
+  - **Предикаты видимости (T4 `cfa3ddca`+`a321686a`):** публичная
+    витрина занятий #600 и фотогалерея (#493 витрина) исключают услуги
+    скрытые (`is_public = false`) или архивные; бронь по прямому id
+    скрытой услуги → 404 байт-в-байт паритет несуществующему
+    (предикат в пробе существования ДО валидации тарифа — без бокового
+    канала); админка не тронута — видит всё.
+  - **api-client (T5 `9ed1c0dd`+`47108ee6`):** `getPublicMasters` /
+    `getPublicServices` + zod-схемы по прецеденту #600/#601; легаси
+    `getMasters` удалён — admin-потребители переехали на
+    `getAllMasters`.
+  - **Web (T6 `29e47b26`):** форма записи (`useSchedule` /
+    `buildSchedule`) переведена на публичные словари — все 4
+    справочника формы (занятия, локации, мастера, услуги) теперь с
+    витринных маршрутов; staff-словари из web не читаются.
+  - **Админ (T7 `ffd1c3a9`):** switch «Видно клиентам» в модалке услуги
+    + бейдж «Не в web» в таблице /services (зеркало #601).
+  - **E2E (T8 `da4f8336`+`8a9aa085`):** admin
+    `services-web-hidden.spec.ts` (3/3) + web
+    `services-web-visibility.spec.ts` (3/3) + анонимная регресс-сеть
+    (14/14 — словари/витрины под анонимом).
+  - Tests: backend per-task сьюты — T1 **21/21** (+**135/135**
+    регрессия), T2 **115/115**, T3 **117/117**, T4 **152/152**;
+    api-client vitest **611/611**; admin vitest **3204/3204**
+    (+typecheck/lint чистые); web vitest **572/572** (+typecheck
+    чистый); полный CI — гейт PR (manager-owned). Visual gate —
+    **EXIT 0** (бейдж «Не в web» на /services desktop; модалка —
+    MANUAL_REVIEW по спеке §7, автоматизация в admin-e2e). Приёмка —
+    все 10 сценариев спеки §4 покрыты (юнит/API/e2e); behavioral
+    delta §5 реализована. DoD-заметки: #599 не смержен — адаптация
+    `specialty` у IMPL (спека §3.5, plain string + комментарий);
+    #584-пересечение закрыто на новом base (пин-тесты `_PUBLIC_GETS`).
+  - Status: `docs/status/2026-11-21-adr015-dictionaries-606.md`
 - **GH #599 — Справочник направлений (specialty dictionary)** — branch
   `599-specialty-dictionary` (9 задач, 15 коммитов
   `c7a987dd..95663f0b`, base `697afb55` = origin/main; 155 файлов,
@@ -137,6 +203,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-11-13
 
 ### Added
+- **GH #551 — Вместимость 0–99: занятие 0 = «запись закрыта», локация
+  0 = «не задана»** — branch `551-capacity-range` (8 задач, порядок
+  исполнения 1–6, 8, 7 — US-7 e2e ассертит тоз T8; 9 коммитов
+  `466b26d4..e2593af7`, base `6494b603`; 26 файлов; спека
+  `docs/specs/2026-11-13-capacity-range-551-design.md` рев.4, план
+  `docs/plans/2026-11-13-capacity-range-551-plan.md` 8/8 — оба на
+  main, unchanged by IMPL):
+  - **Сервер (T1 `466b26d4`, T2 `cb95c2ba`):** write-схемы
+    `ActivityCreate/Update/Patch` и `LocationCreate/Update` +
+    location-patch переопределяют `capacity` `Field(ge=0, le=99)`
+    (вне диапазона → 422); read-схемы без границ (легаси-чтение не
+    ограничено); контрактные матрицы POST/PUT/PATCH; явный пин гварда —
+    запись на занятие с capacity 0 → мгновенный 409
+    `ACTIVITY_AT_CAPACITY` (= «запись закрыта»).
+  - **Формы админки (T3 `6351544e`, T4 `39f4c081`, T5 `92af8cc1`):**
+    create — min 0 / max 99, гейт `canSave` (пустое блокирует «Создать»,
+    явный 0–99 проходит), автозаполнение из локации только при ≥ 1
+    (канон #595 «missing OR 0 counts as no default» в обоих режимах);
+    edit — instant-patch 0–99, пустое поле ≠ 0 (патч не уходит);
+    location-форма 0/99; Zod write-схемы api-client зеркалят сервер
+    (response-схемы — без границ).
+  - **Карточка и штамп (T6 `bdc5255f`, T8 `dc68271f`):** при capacity 0
+    карточка показывает «Запись закрыта · N» (N = occupied) вместо
+    N/M-доли, процент не считается; штамп WeekView/DayView на клетку
+    зала с capacity 0 легально копирует 0 и даёт громкий тост
+    «… запись закрыта (у зала «X» не задана вместимость)».
+  - **e2e (T7 `a2f17891`, `e2593af7`):** admin US-1–3/US-5–7
+    (`capacity-range.spec.ts` NEW) + web US-1 — попытка брони клиента
+    на закрытое занятие отклоняется (`booking-closed-activity.spec.ts`
+    NEW); попутно канон-фикс текста guard-сообщения (санкция
+    архитектора).
+  - Tests: task-level сьюты зелёные **111/0, 7/0, 136/0, 138/0,
+    919/0, 54/0, 47/0**; e2e полные прогоны — admin **537 passed /
+    0 failed / 6 skipped**, web **23/23**; quality-review re-verify
+    **21/21**; visual gate exit 0 (спека §7 — N/A).
+  - Status: домен-правила `activities.md`/`locations.md` — на main;
+    meta-docs — коммит `docs(#551)` этой ветки.
 - **GH #601 — Флаг «не показывать в web» для локаций** — branch
   `601-locations-web-visibility` (6 задач + 2 фикс-коммита
   `fecf11fd..78cbd9b2`, base `92896269` = origin/main; 54 файла,

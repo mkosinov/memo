@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildWebSchedule, type WebScheduleDTO } from '../buildSchedule';
-import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationPublicResponse } from '@memo/api-client';
+import type { ActivityResponse, ServicePublicResponse, MasterPublicResponse, LocationPublicResponse } from '@memo/api-client';
 
 function makeActivity(overrides?: Partial<ActivityResponse>): ActivityResponse {
   return {
@@ -21,7 +21,11 @@ function makeActivity(overrides?: Partial<ActivityResponse>): ActivityResponse {
   };
 }
 
-function makeService(overrides?: Partial<ServiceResponse>): ServiceResponse {
+// #606: the services map carries PUBLIC dictionary rows — exactly the 10
+// showcase fields (ADR-015); tags are plain strings (the #493 precedent).
+// Detail fields (description, ages, specialty) ride the fixture as
+// transport but are not read by the builder (spec §3.4).
+function makeService(overrides?: Partial<ServicePublicResponse>): ServicePublicResponse {
   return {
     id: 'service-1',
     title: 'Морской пейзаж',
@@ -30,35 +34,28 @@ function makeService(overrides?: Partial<ServiceResponse>): ServiceResponse {
     specialty: 'painting',
     min_age: 12,
     max_age: 99,
-    duration: 120,
-    record_info: 'Запись обязательна',
     materials: [
-      { id: 'mat-1', title: 'Акварель', description: 'Акварельные краски', note: null },
-      { id: 'mat-2', title: 'Масло', description: 'Масляные краски', note: 'Густые масляные краски' },
+      { title: 'Акварель', description: 'Акварельные краски', note: null },
+      { title: 'Масло', description: 'Масляные краски', note: 'Густые масляные краски' },
     ],
-    tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' }],
-    tags: [{ id: 'tag-1', title: 'масло' }, { id: 'tag-2', title: 'пейзаж' }],
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
+    tariffs: [{ id: 'tariff-1', title: 'Взрослый', price: 3500 }],
+    tags: ['масло', 'пейзаж'],
     ...overrides,
-  } as ServiceResponse;
+  };
 }
 
-function makeMaster(overrides?: Partial<MasterViewResponse>): MasterViewResponse {
+// #606: the masters map carries PUBLIC dictionary rows — exactly the 5
+// showcase fields (name, specialty, photo); the builder reads only
+// first/last name and avatar_url.
+function makeMaster(overrides?: Partial<MasterPublicResponse>): MasterPublicResponse {
   return {
     id: 'master-1',
     first_name: 'Ольга',
     last_name: 'Середа',
-    color: '#C49A2E',
-    position: 'Художник',
     specialty: 'painting',
     avatar_url: 'https://example.com/avatar.jpg',
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
     ...overrides,
-  } as MasterViewResponse;
+  };
 }
 
 // #601: the location map carries PUBLIC dictionary rows — exactly the 4
@@ -81,8 +78,8 @@ describe('buildWebSchedule', () => {
         'service-1',
         makeService({
           tariffs: [
-            { id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
-            { id: 'tariff-2', service_id: 'service-1', title: 'Детский (5–11 лет)', description: null, price: 2450, audience: 'kid' },
+            { id: 'tariff-1', title: 'Взрослый', price: 3500 },
+            { id: 'tariff-2', title: 'Детский (5–11 лет)', price: 2450 },
           ],
         }),
       ],
@@ -158,6 +155,48 @@ describe('buildWebSchedule', () => {
     expect(dto.size).toBe('');
   });
 
+  // #606 spec §4 scenario 1 (unit part): the card surface is checked by
+  // name on a vitrine-schema service row — every field the card exposes
+  // from the service is asserted individually, so a wrong-field mapper
+  // fails pointedly. The detail fields (description, ages, specialty)
+  // ride the fixture as transport; the builder does not read them (§3.4).
+  it('exposes the vitrine service fields on the card by name', () => {
+    const service = makeService({
+      id: 'svc-vitrine',
+      title: 'Горный эскиз',
+      description: 'Пишем горы пастелью',
+      image_url: 'https://cdn.example.com/mountains.jpg',
+      specialty: 'пейзаж',
+      min_age: 7,
+      max_age: null,
+      materials: [{ title: 'Пастель', description: 'Сухая пастель', note: 'Скетчбук A5' }],
+      tariffs: [{ id: 'tariff-x', title: 'Стандарт', price: 2600 }],
+      tags: ['пейзаж', 'новинка'],
+    });
+
+    const result = buildWebSchedule(
+      [makeActivity({ service_id: 'svc-vitrine' })],
+      new Map([['svc-vitrine', service]]),
+      new Map([['master-1', makeMaster()]]),
+      new Map([['loc-1', makeLocation()]]),
+    );
+    const dto = result.byId.get('act-1') as WebScheduleDTO;
+
+    // card fields sourced from the vitrine service row — by name:
+    expect(dto.serviceTitle).toBe('Горный эскиз');
+    expect(dto.image_url).toBe('https://cdn.example.com/mountains.jpg');
+    expect(dto.tags).toEqual(['пейзаж', 'новинка']);
+    expect(dto.material).toBe('Пастель');
+    expect(dto.materialDetails).toBe('Скетчбук A5');
+    expect(dto.priceMin).toBe(2600);
+    expect(dto.priceMax).toBe(2600);
+    expect(dto.priceHint).toBe('Стандарт: 2600₽');
+    expect(dto.tariffs).toEqual([{ id: 'tariff-x', title: 'Стандарт', price: 2600 }]);
+    // scenario-1 card surface from the other vitrine dictionaries — by name:
+    expect(dto.masterName).toBe('Ольга Середа');
+    expect(dto.masterAvatar).toBe('https://example.com/avatar.jpg');
+  });
+
   describe('materials from links (GH #223 §9)', () => {
     it('derives materialDetails: link note when present, else material description, joined with newline', () => {
       const result = buildWebSchedule(
@@ -174,7 +213,7 @@ describe('buildWebSchedule', () => {
     it('uses description for materials without note (note ?? description fallback)', () => {
       const service = makeService({
         materials: [
-          { id: 'mat-1', title: 'Масло', description: 'Масляные краски — классика', note: null },
+          { title: 'Масло', description: 'Масляные краски — классика', note: null },
         ],
       });
       const result = buildWebSchedule(
@@ -217,7 +256,7 @@ describe('buildWebSchedule', () => {
     it('keeps a whitespace-only note as display text (note ?? description — whitespace is not null)', () => {
       const service = makeService({
         materials: [
-          { id: 'mat-1', title: 'Гуашь', description: 'Плотные матовые краски', note: '   ' },
+          { title: 'Гуашь', description: 'Плотные матовые краски', note: '   ' },
         ],
       });
       const result = buildWebSchedule(
@@ -235,7 +274,7 @@ describe('buildWebSchedule', () => {
 
   it('skips activity when service is missing', () => {
     const activities = [makeActivity()];
-    const services = new Map<string, ServiceResponse>();
+    const services = new Map<string, ServicePublicResponse>();
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
@@ -247,7 +286,7 @@ describe('buildWebSchedule', () => {
   it('skips activity when master is missing', () => {
     const activities = [makeActivity()];
     const services = new Map([['service-1', makeService()]]);
-    const masters = new Map<string, MasterViewResponse>();
+    const masters = new Map<string, MasterPublicResponse>();
     const locations = new Map([['loc-1', makeLocation()]]);
 
     const result = buildWebSchedule(activities, services, masters, locations);

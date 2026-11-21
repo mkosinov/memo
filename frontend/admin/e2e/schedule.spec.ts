@@ -50,19 +50,17 @@ test.describe('Schedule — Week Navigation and UI', () => {
 
     // Click next week arrow
     await clickNextWeek(page);
-    await page.waitForTimeout(500);
 
-    // Date range should change
-    const nextWeekText = await dateRange.textContent();
-    expect(nextWeekText).not.toBe(initialText);
+    // Date range should change — auto-retrying assert (#535 canon: a raw
+    // one-shot read after a fixed 500ms sleep races the URL-driven
+    // re-render under load and read a stale «1-7 июня» on a cold server).
+    await expect(dateRange).not.toHaveText(initialText ?? '');
 
     // Click back to previous week
     await clickPrevWeek(page);
-    await page.waitForTimeout(500);
 
-    // Should restore the original week
-    const restoredText = await dateRange.textContent();
-    expect(restoredText).toBe(initialText);
+    // Should restore the original week (same auto-retry).
+    await expect(dateRange).toHaveText(initialText ?? '');
   });
 
   // ── 2. Today button — returns to current week ──────────────────────────

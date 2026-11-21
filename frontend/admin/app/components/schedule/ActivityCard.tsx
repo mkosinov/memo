@@ -33,6 +33,14 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
   const durMinutes = activity.durationMinutes;
   const heightPx = Math.max(durMinutes * cellHeight / 30 - 8, 60);                // -8 bottom, min 60
   const fillPct = activity.capacity > 0 ? Math.min(activity.occupied / activity.capacity, 1) : 0;
+  // GH #551: capacity 0 = «запись закрыта» — both counters show a closed-enrollment
+  // label (N = occupied; occupied > 0 on a closed activity is legit) instead of the
+  // occupied/capacity fraction. The fill percentage is not computed (fillPct above
+  // stays 0); visual baselines unaffected (their fixtures use capacity 8).
+  const isClosedEnrollment = activity.capacity === 0;
+  const capacityLabel = isClosedEnrollment
+    ? `Запись закрыта · ${activity.occupied}`
+    : `${activity.occupied}/${activity.capacity}`;
 
   // Tier selection (replaces old showExtra/showOnlyPill)
   const isTiny = durMinutes < 60;
@@ -217,7 +225,7 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
               </span>
               {!isStandard && (
                 <span className="flex-shrink-0" data-testid="compact-capacity">
-                  {activity.occupied}/{activity.capacity}
+                  {capacityLabel}
                 </span>
               )}
             </div>
@@ -246,7 +254,7 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
                   <path d="M16 3.13a4 4 0 010 7.75" />
                 </svg>
                 <span className="font-medium">
-                  {activity.occupied}/{activity.capacity}
+                  {capacityLabel}
                 </span>
               </div>
               <button

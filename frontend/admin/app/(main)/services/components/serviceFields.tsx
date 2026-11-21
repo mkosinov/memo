@@ -65,6 +65,21 @@ interface NestedListFieldConfig {
 }
 
 /**
+ * GH #606 (mirror of the #601 locationFields BooleanFieldConfig): boolean
+ * fields render as a `role="switch"` button (donor: ActivityForm
+ * `toggle-private`). Direct binding — checked = value, no inversion.
+ * Initialization defaults to `true` (NOT the non-number empty string —
+ * a '' would 422 the strict payload as a non-boolean).
+ */
+interface BooleanFieldConfig {
+  type: 'boolean';
+  key: string;
+  label: string;
+  /** Switch button testid — mirrors the #601 pin `toggle-is-public`. */
+  testId?: string;
+}
+
+/**
  * Materials checkbox multi-list with per-item notes (GH #223 spec §8).
  * Options are supplied by the modal (dictionary-backed — ACTIVE materials
  * from `/all?status=active`), NOT stored here: the config stays a pure
@@ -111,7 +126,8 @@ export type ServiceFieldConfig =
   | MaterialsFieldConfig
   | SelectFieldConfig
   | TagsFieldConfig
-  | SpecialtyFieldConfig;
+  | SpecialtyFieldConfig
+  | BooleanFieldConfig;
 
 export const SERVICE_FIELDS: ServiceFieldConfig[] = [
   {
@@ -194,6 +210,10 @@ export const SERVICE_FIELDS: ServiceFieldConfig[] = [
     label: 'Картинка URL',
     placeholder: 'https://...',
   },
+  // GH #606: «Видно клиентам» — checked = is_public (visible on the site).
+  // Available at create AND edit; hidden ≠ archived (mirror of the #601
+  // location toggle, spec §3.6).
+  { type: 'boolean', key: 'is_public', label: 'Видно клиентам', testId: 'toggle-is-public' },
   {
     type: 'nested-list',
     key: 'tariffs',

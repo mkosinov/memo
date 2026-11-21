@@ -86,9 +86,6 @@ _ENDPOINT_PARAMS = pytest.mark.parametrize(
 )
 
 _PUBLIC_GETS = [
-    "/api/v1/masters",
-    "/api/v1/services",
-    "/api/v1/tags",
     # GH #493: the anonymous photo showcase lives at /public/photos —
     # bare ``GET /api/v1/photos`` is guarded now (photos:read).
     "/api/v1/public/photos",
@@ -100,6 +97,12 @@ _PUBLIC_GETS = [
     # rows excluded server-side) — bare location GETs are guarded now
     # (locations:read, #601 Task 2).
     "/api/v1/public/locations",
+    # GH #606 Task 3: the anonymous masters/services dictionaries
+    # (ADR-015 audience namespace) — the bare GETs are guarded now
+    # (masters:read / services:read). Tags have NO showcase of their
+    # own — the services showcase carries tag titles as sorted strings.
+    "/api/v1/public/masters",
+    "/api/v1/public/services",
     "/api/v1/health",
 ]
 

@@ -583,7 +583,11 @@ async def list_public_activities_view(
     client-side concern), and the join to ``locations`` adds the #601
     visibility terms (``is_active`` + ``is_public`` — an activity of an
     archived OR hidden location never leaves the server; the join is
-    1:1 on the locations PK, so it can't duplicate rows). Sort is
+    1:1 on the locations PK, so it can't duplicate rows). The join to
+    ``services`` adds the #606 mirror terms (same flags, same shape):
+    an activity of an archived OR hidden service stays server-side too
+    (also fixes the pre-#606 leak of archived-service activities; 1:1
+    on the services PK — no duplicates). Sort is
     pinned: ``start ASC, id ASC`` (the web schedule's deterministic
     feed; no sort surface). Date window: whole-day inclusive bounds
     via the shared ``day_range`` canon; when ``date_from`` is absent
@@ -613,10 +617,13 @@ async def list_public_activities_view(
     stmt = (
         select(Activity)
         .join(Location, Activity.location_id == Location.id)
+        .join(Service, Activity.service_id == Service.id)
         .where(
             Activity.is_private.is_not(True),
             Location.is_active.is_(True),
             Location.is_public.is_(True),
+            Service.is_active.is_(True),
+            Service.is_public.is_(True),
         )
     )
     id_pred = ids_in_predicate(Activity.id, params.id)

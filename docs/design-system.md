@@ -515,7 +515,7 @@ parts in fixed order (мастер, услуга, локация).
   {/* filled:   width = fillPct%, bg rgba(0,0,0,0.20) */}
   {/* unfilled: left = fillPct%,  bg rgba(0,0,0,0.06) */}
   {/* content: z-[var(--z-base)], px-2 py-1.5, text-[13px] text-black */}
-  {/*   left:  users icon + «occupied/capacity» */}
+  {/*   left:  users icon + «occupied/capacity»; capacity 0 → «Запись закрыта · N», fillPct = 0 (GH #551) */}
   {/*   right: quick action — + (public) / ··· (private), btn-quick-add */}
 </div>
 ```

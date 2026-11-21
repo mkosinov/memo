@@ -62,6 +62,8 @@ export function ServicesTable() {
     // #223 T5/T13: the form sends `materials` (checkbox multi-list state →
     // {material_id, note?}[] in ServiceModal's handleSubmit) — PUT hard-replaces
     // the links. `material_hint` is retired everywhere (Task 13, spec §10).
+    // GH #606 §3.6 (canon #601): the modal payload CARRIES the flag on every
+    // PUT (full-replace) — absence would mean the backend default `true`.
     const payload = {
       title: data.title as string,
       description: (data.description as string | null | undefined) ?? '',
@@ -75,6 +77,7 @@ export function ServicesTable() {
       max_age: (data.max_age as number | null | undefined) ?? null,
       duration: data.duration as number,
       record_info: (data.record_info as string | null | undefined) ?? '',
+      is_public: data.is_public as boolean,
       tariffs: (data.tariffs as ServiceUpdate['tariffs'] | undefined) ?? [],
       tag_ids: (data.tag_ids as string[] | undefined) ?? [],
       materials: (data.materials as ServiceUpdate['materials'] | undefined) ?? [],

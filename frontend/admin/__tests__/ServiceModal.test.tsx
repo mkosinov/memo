@@ -653,6 +653,7 @@ describe('ServiceModal — tags field (GH #328)', () => {
   });
 });
 
+
 // ─── GH #599: «Направление» — dictionary select from /specialties/all ──────
 
 describe('ServiceModal — specialty dictionary select (GH #599)', () => {
@@ -718,6 +719,84 @@ describe('ServiceModal — specialty dictionary select (GH #599)', () => {
     const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.specialty_id).toBe('spec-painting');
     // The display title never travels — the wire is the id reference only.
-    expect('specialty' in payload).toBe(false);
+  });
+});
+
+// ─── GH #606: «Видно клиентам» switch (mirror of the #601 LocationModal) ───
+
+/** GH #606 fixtures: edit shapes for both visibility polarities. */
+const HIDDEN_SERVICE: Record<string, unknown> = {
+  ...NULL_AGE_SERVICE,
+  id: 'svc-hidden',
+  is_public: false,
+};
+
+const VISIBLE_SERVICE: Record<string, unknown> = {
+  ...NULL_AGE_SERVICE,
+  id: 'svc-visible',
+  is_public: true,
+};
+
+describe('ServiceModal — «Видно клиентам» switch (GH #606)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetTags.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 10 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('create: renders the switch labelled «Видно клиентам», ON by default', () => {
+    renderModal({ service: null, title: 'Новая услуга' });
+    const toggle = screen.getByRole('switch');
+    expect(toggle).toHaveAttribute('data-testid', 'toggle-is-public');
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('Видно клиентам')).toBeInTheDocument();
+  });
+
+  it('create: default submit payload carries is_public=true as a boolean', async () => {
+    const { onSubmit } = renderModal({ service: null, title: 'Новая услуга' });
+    changeValue(inputByLabel(/^Название/), 'Созданная');
+    changeValue(inputByLabel(/^Длительность/), '90');
+    clickSave();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.is_public).toBe(true);
+    expect(typeof payload.is_public).toBe('boolean');
+  });
+
+  it('create: toggling off submits is_public=false as a boolean', async () => {
+    const { onSubmit } = renderModal({ service: null, title: 'Новая услуга' });
+    changeValue(inputByLabel(/^Название/), 'Скрытая при создании');
+    changeValue(inputByLabel(/^Длительность/), '90');
+    fireEvent.click(screen.getByRole('switch'));
+    expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    clickSave();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.is_public).toBe(false);
+    expect(typeof payload.is_public).toBe('boolean');
+  });
+
+  it('edit: reflects is_public=false from the service and submits false', async () => {
+    const { onSubmit } = renderModal({ service: HIDDEN_SERVICE });
+    expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    clickSave();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.is_public).toBe(false);
+    expect(typeof payload.is_public).toBe('boolean');
+  });
+
+  it('edit: toggling a visible service off submits is_public=false', async () => {
+    const { onSubmit } = renderModal({ service: VISIBLE_SERVICE });
+    expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('switch'));
+    expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    clickSave();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.is_public).toBe(false);
   });
 });

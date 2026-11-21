@@ -2,7 +2,8 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+import sqlalchemy as sa
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.abstract import AbstractModelSoftDelete
@@ -34,6 +35,12 @@ class Service(AbstractModelSoftDelete):
     max_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration: Mapped[int] = mapped_column(Integer)
     record_info: Mapped[str] = mapped_column(Text)
+    # GH #606: web-visibility flag — true = shown on the client site
+    # (default), false = hidden from the site only, fully working in
+    # admin. Distinct from the archive (is_active). Mirror of #601.
+    is_public: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.true(),
+    )
 
     # The dictionary side of the link (many-to-one). Named ``…_ref`` so
     # the DISPLAY string keeps the natural ``specialty`` name below —

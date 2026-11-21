@@ -765,3 +765,69 @@ class TestLocationListIdFilter:
             [first["id"], second["id"]]
         )
         assert body["total"] == 2
+
+
+class TestLocationCapacityRange:
+    """Capacity 0–99 enforced on write schemas (GH #551 rev.3, user
+    decision 2026-11-13): 0 = «вместимость не задана» (legal, no
+    operational effect), 99 = upper bound, anything outside → 422
+    (прежний предел 500 отменён). Read schemas stay unbounded — legacy
+    rows must keep parsing."""
+
+    @pytest.mark.parametrize(
+        ("capacity", "expected"),
+        [(0, 201), (1, 201), (99, 201), (100, 422), (-1, 422)],
+    )
+    def test_post_capacity_bounds(
+        self, api_client, capacity: int, expected: int
+    ) -> None:
+        payload = {**LOCATION_PAYLOAD, "capacity": capacity}
+
+        response = api_client.post("/api/v1/locations", json=payload)
+
+        assert response.status_code == expected
+
+    @pytest.mark.parametrize(
+        ("capacity", "expected"),
+        [(0, 200), (1, 200), (99, 200), (100, 422), (-1, 422)],
+    )
+    def test_put_capacity_bounds(
+        self, api_client, create_location, capacity: int, expected: int
+    ) -> None:
+        location = create_location()
+        payload = {**LOCATION_PAYLOAD, "capacity": capacity}
+
+        response = api_client.put(
+            f"/api/v1/locations/{location['id']}", json=payload
+        )
+
+        assert response.status_code == expected
+
+    def test_patch_without_capacity_passes(
+        self, api_client, create_location
+    ) -> None:
+        """PATCH body without the capacity key must not touch it."""
+        location = create_location()
+
+        response = api_client.patch(
+            f"/api/v1/locations/{location['id']}",
+            json={"description": "no capacity key"},
+        )
+
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize(
+        ("capacity", "expected"),
+        [(0, 200), (-1, 422), (100, 422)],
+    )
+    def test_patch_capacity_bounds(
+        self, api_client, create_location, capacity: int, expected: int
+    ) -> None:
+        location = create_location()
+
+        response = api_client.patch(
+            f"/api/v1/locations/{location['id']}",
+            json={"capacity": capacity},
+        )
+
+        assert response.status_code == expected

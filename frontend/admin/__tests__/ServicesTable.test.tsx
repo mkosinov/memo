@@ -44,6 +44,7 @@ const mockService1: ServiceResponse = {
   ],
   tags: [{ id: 'tag-1', title: 'масло' }],
   materials: [],
+  is_public: true,
   archived: false,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
@@ -65,6 +66,7 @@ const mockService2: ServiceResponse = {
   ],
   tags: [{ id: 'tag-2', title: 'акрил' }],
   materials: [],
+  is_public: true,
   archived: false,
   created_at: '2024-02-01T00:00:00Z',
   updated_at: '2024-02-01T00:00:00Z',
@@ -84,6 +86,7 @@ const mockService3: ServiceResponse = {
   tariffs: [],
   tags: [],
   materials: [],
+  is_public: true,
   archived: true,
   created_at: '2024-03-01T00:00:00Z',
   updated_at: '2024-03-01T00:00:00Z',
@@ -1133,6 +1136,42 @@ describe('ServicesTable', () => {
     await waitFor(() => expect(mockCreateMutateAsync).toHaveBeenCalled());
     const data = mockCreateMutateAsync.mock.calls[0][0] as Record<string, unknown>;
     expect(data.materials).toEqual([{ material_id: 'mat-a' }]);
+  });
+
+  // ─── «Видно клиентам» edit payload (GH #606 — mirror of #601 Task 4) ───
+
+  it('edit submit payload carries is_public as a boolean (GH #606)', async () => {
+    const hidden: ServiceResponse = {
+      ...mockService1,
+      id: 'svc-hidden',
+      title: 'Скрытая Услуга',
+      is_public: false,
+      archived: false,
+    };
+    setupEnvelope({ items: [hidden], total: 1 });
+    renderTable();
+    expect(await screen.findByText('Скрытая Услуга')).toBeInTheDocument();
+
+    // Open the edit modal on the hidden row.
+    fireEvent.click(screen.getByText('Скрытая Услуга').closest('tr')!);
+
+    // Direct binding: the switch reflects the hidden state, no inversion.
+    const toggle = screen.getByRole('switch');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    // Flip «Видно клиентам» back on (US-4) and save.
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    const [callArg] = mockUpdateMutateAsync.mock.calls[0];
+    expect(callArg.id).toBe('svc-hidden');
+    const data = callArg.data as Record<string, unknown>;
+    // DoD: the canonical PUT payload carries the flag as a boolean
+    // (is_private canon) — a string would 422 the strict schema.
+    expect(data.is_public).toBe(true);
+    expect(typeof data.is_public).toBe('boolean');
   });
 });
 

@@ -611,6 +611,83 @@ class TestHiddenLocationActivity404:
         assert query_db("SELECT COUNT(*) AS n FROM records")[0]["n"] == 0
 
 
+# ─── GH #606: a hidden/archived-SERVICE activity id books exactly like ──────────
+# ─── a missing one (spec §3.6 — the service mirror of the #601 terms) ──────────
+
+
+class TestHiddenServiceActivity404:
+    """An activity whose service is archived OR hidden (``is_public =
+    false``) is indistinguishable from a nonexistent one (#606 §3.6).
+
+    The service-visibility terms ride the SAME existence probe as the
+    #600 private and #601 location terms — one query, BEFORE any
+    tariff validation — so the id can't be told apart from a missing
+    one (byte-identical 404, no side channel), and no rows are ever
+    written (scenario 9: the client with a direct link gets a plain
+    404, the record is not created).
+    """
+
+    def test_hidden_service_activity_404_body_identical_to_missing(
+        self, api_client, create_service, create_activity,
+    ) -> None:
+        # Built BEFORE _owner wipes the staff jar (factories ride it).
+        hidden_svc = create_service(is_public=False)
+        hidden = create_activity(service_id=hidden_svc["id"])
+        _owner(api_client)
+
+        resp_hidden = api_client.post(MY_RECORDS_URL, json={
+            "activity_id": hidden["id"],
+            "phone": CLIENT_PHONE,
+            "visits": [{}],
+        })
+        resp_missing = api_client.post(MY_RECORDS_URL, json={
+            "activity_id": "00000000-0000-0000-0000-000000000000",
+            "phone": CLIENT_PHONE,
+            "visits": [{}],
+        })
+
+        assert resp_hidden.status_code == 404, resp_hidden.text
+        assert resp_missing.status_code == 404, resp_missing.text
+        assert resp_hidden.content == resp_missing.content, (
+            "a hidden-service activity id must be byte-identical to a missing one"
+        )
+        assert query_db("SELECT COUNT(*) AS n FROM records")[0]["n"] == 0
+
+    def test_archived_service_activity_404_nothing_written(
+        self, api_client, create_service, create_activity,
+    ) -> None:
+        """The archived half of the §3.6 predicate: same 404, no record."""
+        archived_svc = create_service()
+        resp_archive = api_client.post(
+            f"/api/v1/services/{archived_svc['id']}/archive"
+        )
+        assert resp_archive.status_code == 200, resp_archive.text
+        archived = create_activity(service_id=archived_svc["id"])
+        _owner(api_client)
+
+        resp = api_client.post(MY_RECORDS_URL, json={
+            "activity_id": archived["id"],
+            "phone": CLIENT_PHONE,
+            "visits": [{}],
+        })
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.ACTIVITY_NOT_FOUND.value
+        assert query_db("SELECT COUNT(*) AS n FROM records")[0]["n"] == 0
+
+    def test_visible_service_activity_still_books(
+        self, api_client, free_activity,
+    ) -> None:
+        """The predicate does not over-match: an activity of a default
+        (active + public) service still books per the contract."""
+        _owner(api_client)
+        resp = api_client.post(MY_RECORDS_URL, json={
+            "activity_id": free_activity["id"],
+            "phone": CLIENT_PHONE,
+            "visits": [{}],
+        })
+        assert resp.status_code == 201, resp.text
+
+
 # ─── anti-spam: 20 records / 40 visits per account per 15 minutes ──────────────
 
 

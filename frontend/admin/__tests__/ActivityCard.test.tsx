@@ -84,10 +84,46 @@ describe('ActivityCard', () => {
     }).not.toThrow();
   });
 
-  it('shows "0/0" occupancy when capacity is 0', () => {
+  // ─── GH #551: capacity 0 = «запись закрыта» ────────────────────────────
+
+  it('shows «Запись закрыта · 0» instead of a fraction when capacity is 0 and occupied is 0', () => {
     const zeroCapActivity = { ...mockActivity, capacity: 0, occupied: 0 };
     render(<ActivityCard activity={zeroCapActivity} master={mockMaster} />);
-    expect(screen.getByText('0/0')).toBeInTheDocument();
+    expect(screen.getByText('Запись закрыта · 0')).toBeInTheDocument();
+    expect(screen.queryByText('0/0')).not.toBeInTheDocument();
+  });
+
+  it('shows «Запись закрыта · N» with N = occupied (closed activity, occupied > 0 is legit)', () => {
+    const closedWithGuests = { ...mockActivity, capacity: 0, occupied: 3 };
+    render(<ActivityCard activity={closedWithGuests} master={mockMaster} />);
+    expect(screen.getByText('Запись закрыта · 3')).toBeInTheDocument();
+    expect(screen.queryByText('3/0')).not.toBeInTheDocument();
+  });
+
+  it('closed label in the compact-capacity slot too (compact 1:00)', () => {
+    const closedCompact = { ...mockActivity, durationMinutes: 60, capacity: 0, occupied: 2 };
+    render(
+      <ActivityCard
+        activity={closedCompact}
+        master={mockMaster}
+        locations={[mockLocation]}
+      />
+    );
+    expect(screen.getByTestId('compact-capacity')).toHaveTextContent('Запись закрыта · 2');
+    expect(screen.queryByText('2/0')).not.toBeInTheDocument();
+  });
+
+  it('closed card renders no fill — progress bar stays at 0% width', () => {
+    const closedActivity = { ...mockActivity, capacity: 0, occupied: 5 };
+    const { container } = render(<ActivityCard activity={closedActivity} master={mockMaster} />);
+    const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
+    expect(filledBar).toHaveStyle({ width: '0%' });
+  });
+
+  it('capacity > 0 keeps the fraction display (regression guard)', () => {
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    expect(screen.getByText('3/8')).toBeInTheDocument();
+    expect(screen.queryByText(/Запись закрыта/)).not.toBeInTheDocument();
   });
 
   it('clamps occupancy ratio when occupied exceeds capacity', () => {

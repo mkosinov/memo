@@ -27,7 +27,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const [serviceId, setServiceId] = useState(activity.serviceId);
   const [masterId, setMasterId] = useState(activity.masterId);
   const [locationId, setLocationId] = useState(activity.locationId);
-  const [capacity, setCapacity] = useState(activity.capacity);
+  const [capacity, setCapacity] = useState<number | ''>(activity.capacity);
   const [durationStr, setDurationStr] = useState(formatTime(activity.durationMinutes));
   const [isPrivate, setIsPrivate] = useState(activity.isPrivate);
   const [startDateTime, setStartDateTime] = useState(() => {
@@ -83,14 +83,21 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     [onUpdate],
   );
 
-  // Handle capacity change (GH #280: вместимость ≥ 1) — instant-patch
-  // convention like the «ЧЧ:ММ» duration: the field follows the raw input,
-  // but empty/zero values are silently not applied (no patch fires).
+  // Handle capacity change (GH #551: вместимость 0–99) — instant-patch
+  // convention like the «ЧЧ:ММ» duration: the field follows the raw input
+  // (`number | ''` — an empty field NEVER writes 0 into state, it stays
+  // empty on screen), the PATCH fires only for an explicit 0–99 value;
+  // empty and out-of-range input stay silent (an explicit 0 = «запись
+  // закрыта» — legal instant patch, supersedes the #280 «min 1» rule).
   const handleCapacityChange = useCallback(
     (value: string) => {
+      if (value === '') {
+        setCapacity('');
+        return;
+      }
       const val = Number(value);
       setCapacity(val);
-      if (val >= 1) {
+      if (!isNaN(val) && val >= 0 && val <= 99) {
         onUpdate({ capacity: val });
       }
     },

@@ -55,6 +55,7 @@ const serviceFixture: ServiceResponse = {
   tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: 'Билет для взрослого', price: 2500, audience: 'adult' }],
   tags: [{ id: 'tag-1', title: 'масло' }],
   materials: [],
+  is_public: true,
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',

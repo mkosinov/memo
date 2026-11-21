@@ -53,8 +53,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
+from sqlalchemy import asc, func, select, update
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
 
 from src.domain.deletion import BlockingDepsError
@@ -74,7 +74,7 @@ from src.models.staff import Staff
 from src.repositories.generic import BaseRepository, get_base_repository
 from src.repositories.search import ids_in_predicate
 from src.schemas.common import PaginatedResponse
-from src.schemas.master import MasterViewResponse
+from src.schemas.master import MasterPublicResponse, MasterViewResponse
 from src.services.generic import BARE_LIST_MAX_ROWS
 
 if TYPE_CHECKING:
@@ -234,6 +234,42 @@ async def list_all_masters_view(
         # ``Staff.__tablename__`` would misdirect to /api/v1/staff).
         raise BareListLimitExceededError("masters", BARE_LIST_MAX_ROWS)
     return [_to_response(row) for row in rows]
+
+
+async def list_public_masters_view(
+    db_session: AsyncSession,
+) -> list[MasterPublicResponse]:
+    """``/api/v1/public/masters`` anonymous dictionary (ADR-015, #606).
+
+    Modeled on ``list_public_locations_view`` (the #601 precedent): a
+    module-level free function behind the anonymous route, with the
+    per-audience ``MasterPublicResponse`` schema and FORCED visibility
+    — only ACTING masters (``masters.is_active``, the schedule flag
+    D3) leave the server, the exact filter of the staff list
+    (``_view_stmt`` ACTIVE); masters have no ``is_public`` flag
+    (#606: only ``is_active``). The shared ``list_masters_view`` /
+    ``list_all_masters_view`` are NOT touched (the admin grid rides
+    them).
+
+    Bare array canon of ``/all`` (spec §3.1): no parameters, no
+    envelope, pinned order ``Staff.sort_order     ASC, Staff.first_name
+    ASC, Staff.id ASC`` (the staff-list order — all staff-table
+    columns), the ``BARE_LIST_MAX_ROWS`` ceiling via the same LIMIT+1
+    probe (the 1001st row raises ``BareListLimitExceededError`` → 422
+    in the router).
+    """
+    stmt = (
+        _view_stmt(ArchiveStatus.ACTIVE)
+        .order_by(asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id))
+        .limit(BARE_LIST_MAX_ROWS + 1)
+    )
+    rows = (await db_session.execute(stmt)).all()
+    if len(rows) > BARE_LIST_MAX_ROWS:
+        raise BareListLimitExceededError("masters", BARE_LIST_MAX_ROWS)
+    return [
+        MasterPublicResponse.model_validate(_MasterViewRow.build(row[0], row[1]))
+        for row in rows
+    ]
 
 
 # ─── writes: the ``masters`` owner (scenario building blocks) ───────────────

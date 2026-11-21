@@ -38,6 +38,7 @@ from src.auth.service import booking_spam_gate, register_booking
 from src.errors import ErrorCode, ErrorDetail
 from src.models.activity import Activity
 from src.models.location import Location
+from src.models.service import Service
 from src.models.tariff import Tariff
 from src.schemas.my import MyRecordCreate, MyRecordResponse, MyVisitResponse
 from src.schemas.record import RecordCreate, VisitItem
@@ -85,15 +86,21 @@ async def create_my_record(
     # an activity of an archived OR hidden (``is_public = false``)
     # location is 404 exactly like a missing id (direct-id booking
     # guard; the 1:1 PK join can't duplicate the row).
+    # GH #606 §3.6: the service-visibility terms mirror #601 — an
+    # activity of an archived OR hidden service is 404 with body parity
+    # (same 1:1 PK join shape, no duplicates, nothing written).
     activity = (
         await db_session.execute(
             select(Activity)
             .join(Location, Activity.location_id == Location.id)
+            .join(Service, Activity.service_id == Service.id)
             .where(
                 Activity.id == data.activity_id,
                 Activity.is_private.is_not(True),
                 Location.is_active.is_(True),
                 Location.is_public.is_(True),
+                Service.is_active.is_(True),
+                Service.is_public.is_(True),
             )
         )
     ).scalar_one_or_none()

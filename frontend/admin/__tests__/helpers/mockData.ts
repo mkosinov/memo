@@ -248,6 +248,7 @@ export const mockServiceResponse: ServiceResponse = {
   ],
   tags: [],
   materials: [],
+  is_public: true, // GH #606: web-visibility flag — true = shown on the site
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',

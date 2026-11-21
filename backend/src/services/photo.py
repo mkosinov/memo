@@ -13,7 +13,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any, overload
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, case, delete, exists, or_, select, update
+from sqlalchemy import ColumnElement, and_, case, delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,6 +22,7 @@ from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.photo import Photo, photo_tags
+from src.models.service import Service
 from src.models.tag import Tag
 from src.repositories.generic import get_base_repository
 from src.repositories.search import SearchField, ids_in_predicate, search_predicate
@@ -131,6 +132,48 @@ def _activity_scope_predicate(master_key: str | None) -> ColumnElement[bool] | N
             Activity.master_id == master_key,
         )
         .correlate(Photo)
+    )
+
+
+def _owner_service_visibility_predicate() -> ColumnElement[bool]:
+    """Owner-service visibility terms for the public gallery (GH #606
+    spec §3.6).
+
+    A photo whose OWNING service (direct via ``Photo.service_id`` OR
+    via ``Photo.activity_id → Activity.service_id`` — the #576 variant
+    A ownership paths) is archived (``is_active = false``) OR hidden
+    (``is_public = false``) never leaves the server. Photos have AT
+    MOST ONE owner (``ck_photos_single_owner`` DB CHECK), so checking
+    both paths conjunctively is exact: for a direct-service photo the
+    activity leg is trivially true (``activity_id`` IS NULL → OR short
+    -circuits) and vice versa; owner-less / client / location photos
+    have neither leg set and stay visible.
+
+    Correlated EXISTS pair (not a JOIN), mirroring
+    ``_activity_scope_predicate``: no FROM-clause surgery in
+    ``list_photos_view`` — the ``service_id``-filter LEFT JOIN path
+    stays untouched, and ``.correlate(Photo)`` pins the correlation to
+    the photos row even when that join is present.
+    """
+    direct_visible = exists(
+        select(Service.id).where(
+            Service.id == Photo.service_id,
+            Service.is_active.is_(True),
+            Service.is_public.is_(True),
+        )
+    ).correlate(Photo)
+    via_activity_visible = exists(
+        select(Activity.id)
+        .join(Service, Activity.service_id == Service.id)
+        .where(
+            Activity.id == Photo.activity_id,
+            Service.is_active.is_(True),
+            Service.is_public.is_(True),
+        )
+    ).correlate(Photo)
+    return and_(
+        or_(Photo.service_id.is_(None), direct_visible),
+        or_(Photo.activity_id.is_(None), via_activity_visible),
     )
 
 
@@ -400,6 +443,7 @@ async def list_photos_view(
     *,
     item_mapper: None = ...,
     order_by: Sequence[SortExpr] | None = ...,
+    extra_conds: Sequence[ColumnElement[bool]] | None = ...,
 ) -> tuple[list[PhotoResponse], int]: ...
 
 
@@ -411,6 +455,7 @@ async def list_photos_view[ResponseT](
     *,
     item_mapper: Callable[[Photo], ResponseT],
     order_by: Sequence[SortExpr] | None = ...,
+    extra_conds: Sequence[ColumnElement[bool]] | None = ...,
 ) -> tuple[list[ResponseT], int]: ...
 
 
@@ -421,6 +466,7 @@ async def list_photos_view(
     *,
     item_mapper: Callable[[Photo], Any] | None = None,
     order_by: Sequence[SortExpr] | None = None,
+    extra_conds: Sequence[ColumnElement[bool]] | None = None,
 ) -> tuple[list[Any], int]:
     """Paginated photo list composite riding the repo row core (GH #213
     §5.2; Corridor 3 free function — GH #217 Task 3, ADR 007 / canon
@@ -450,6 +496,12 @@ async def list_photos_view(
     given, it REPLACES the ``apply_sort`` resolution (the public
     showcase ``service_id`` two-group order rides this seam; None →
     the shared resolver, unchanged admin behavior).
+
+    ``extra_conds`` (GH #606): caller-supplied WHERE predicates,
+    AND-combined with the scope/params conditions — the public
+    showcase rides this seam with the owner-service visibility terms
+    (``_owner_service_visibility_predicate``); None → unchanged
+    admin behavior.
     """
     client_name = select(Client.name).where(Client.id == Photo.client_id).scalar_subquery()
     stmt = select(Photo, client_name.label("client_name")).options(selectinload(Photo.tags))
@@ -486,6 +538,11 @@ async def list_photos_view(
     if params.tag_id:
         for t in dict.fromkeys(params.tag_id):          # dedupe, keep order
             conds.append(Photo.tags.any(Tag.id == t))   # per-tag EXISTS, AND-chained
+    # GH #606: caller-supplied forced predicates AND-combine with the
+    # params-derived conds (the public showcase passes the owner-service
+    # visibility terms; None → admin behavior unchanged).
+    if extra_conds:
+        conds.extend(extra_conds)
     if conds:
         stmt = stmt.where(*conds)
 
@@ -536,6 +593,12 @@ async def list_public_photos_view(
     through. The admin ``client_name`` subquery still runs (shared
     stmt) but its result is dropped by the explicit item mapper
     (``MyPhotoItem`` pattern — ``tag.title`` strings).
+
+    GH #606 §3.6: the ``extra_conds`` seam carries the owner-service
+    visibility terms — photos of a hidden (``is_public = false``) or
+    archived (``is_active = false``) service vanish from the feed AND
+    from the ``?service_id=`` narrowing (a hidden id probes EMPTY,
+    parity with a nonexistent one).
     """
 
     list_params = PhotoListParams(
@@ -568,5 +631,9 @@ async def list_public_photos_view(
         )
 
     return await list_photos_view(
-        db_session, list_params, item_mapper=_public_item, order_by=order_by
+        db_session,
+        list_params,
+        item_mapper=_public_item,
+        order_by=order_by,
+        extra_conds=[_owner_service_visibility_predicate()],
     )

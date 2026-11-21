@@ -1063,3 +1063,76 @@ class TestDeleteDeferredContract:
         assert query_db(
             f"SELECT * FROM activity_tags WHERE activity_id='{activity_id}'"
         ) == []
+
+
+class TestActivityCapacityRange:
+    """Capacity 0–99 enforced on write schemas (GH #551, user decision
+    2026-11-13): 0 = «запись закрыта» (legal, booking guard 409s on it),
+    99 = upper bound, anything outside → 422. Read schemas stay
+    unbounded — legacy rows must keep parsing."""
+
+    @pytest.mark.parametrize(
+        ("capacity", "expected"),
+        [(0, 201), (99, 201), (-1, 422), (100, 422)],
+    )
+    def test_post_capacity_bounds(
+        self, api_client, capacity: int, expected: int
+    ) -> None:
+        prereqs = _create_prerequisites(api_client)
+        payload = {**_activity_payload(prereqs), "capacity": capacity}
+
+        response = api_client.post("/api/v1/activities", json=payload)
+
+        assert response.status_code == expected
+
+    @pytest.mark.parametrize(
+        ("capacity", "expected"),
+        [(0, 200), (99, 200), (-1, 422), (100, 422)],
+    )
+    def test_put_capacity_bounds(
+        self, api_client, capacity: int, expected: int
+    ) -> None:
+        prereqs = _create_prerequisites(api_client)
+        created = api_client.post(
+            "/api/v1/activities", json=_activity_payload(prereqs)
+        ).json()
+        payload = {**_activity_payload(prereqs), "capacity": capacity}
+
+        response = api_client.put(
+            f"/api/v1/activities/{created['id']}", json=payload
+        )
+
+        assert response.status_code == expected
+
+    def test_patch_without_capacity_passes(self, api_client) -> None:
+        """PATCH body without the capacity key must not touch it."""
+        prereqs = _create_prerequisites(api_client)
+        created = api_client.post(
+            "/api/v1/activities", json=_activity_payload(prereqs)
+        ).json()
+
+        response = api_client.patch(
+            f"/api/v1/activities/{created['id']}",
+            json={"comment": "no capacity key"},
+        )
+
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize(
+        ("capacity", "expected"),
+        [(0, 200), (-1, 422), (100, 422)],
+    )
+    def test_patch_capacity_bounds(
+        self, api_client, capacity: int, expected: int
+    ) -> None:
+        prereqs = _create_prerequisites(api_client)
+        created = api_client.post(
+            "/api/v1/activities", json=_activity_payload(prereqs)
+        ).json()
+
+        response = api_client.patch(
+            f"/api/v1/activities/{created['id']}",
+            json={"capacity": capacity},
+        )
+
+        assert response.status_code == expected

@@ -151,6 +151,11 @@ class ServiceIn(_In):
     max_age: int | None = Field(default=None, ge=0)
     duration: int = Field(gt=0)
     record_info: str = ""
+    # GH #606: web visibility — false hides the service from the client
+    # site only (admin keeps it fully working). CSV owners' table
+    # conversion rule (spec §2.7, canon; same as locations #601): column
+    # «видно клиентам» — пусто/«да» → true, «нет» → false.
+    is_public: bool = True
     tags: list[str] = Field(default_factory=list)
     tariffs: list[TariffIn] = Field(default_factory=list)
     materials: list[MaterialLinkIn] = Field(default_factory=list)
@@ -709,6 +714,9 @@ async def _apply_services(
                 f"не найдено в справочнике. Объявите его в specialties "
                 f"или поправьте название"
             )
+        # Apply whitelist — every column the file owns. GH #606: is_public
+        # included (same as locations #601), so a re-run flips web
+        # visibility per the file.
         fields: dict[str, Any] = {
             "description": item.description,
             "image_url": item.image_url,
@@ -717,6 +725,7 @@ async def _apply_services(
             "max_age": item.max_age,
             "duration": item.duration,
             "record_info": item.record_info,
+            "is_public": item.is_public,
         }
         row = existing.get(item.title)
         if row is None:

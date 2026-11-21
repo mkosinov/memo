@@ -225,15 +225,26 @@ class TestPublicRoutes:
         # GH #601: bare location GETs left the allowlist too — both
         # carry the locations:read guard now; the anonymous dictionary
         # is /public/locations.
+        # GH #606: the anonymous masters + services dictionaries joined
+        # the list — minimal 5-field / 10-field showcase schemas, only
+        # acting / active+public rows; the bare GET /masters, /services
+        # entries left with the #606 Task 3 cleanup (masters:read /
+        # services:read guards). Task 3.2: the bare tags GETs left too
+        # (tags:read guards) — tags have no showcase of their own (the
+        # services showcase carries tag titles as sorted strings).
         assert frozenset({
             ("GET", "/api/v1/health"),
-            # GH #266 D8: /masters is read-only acting masters; GET /{id}
-            # was removed with the mutations (allowlist entry gone too).
-            ("GET", "/api/v1/masters"),
-            ("GET", "/api/v1/services"),
-            ("GET", "/api/v1/services/{id}"),
-            ("GET", "/api/v1/tags"),
-            ("GET", "/api/v1/tags/{id}"),
+            # GH #606 Task 3 (#601 / #600 / #493 precedents): bare
+            # ("GET", "/api/v1/masters"), ("GET", "/api/v1/services")
+            # and ("GET", "/api/v1/services/{id}") left the allowlist —
+            # all three routes carry the masters:read / services:read
+            # guards now; the anonymous dictionaries are /public/masters
+            # and /public/services below.
+            # GH #606 Task 3.2: bare ("GET", "/api/v1/tags") and ("GET",
+            # "/api/v1/tags/{id}") left the allowlist — both routes
+            # carry the tags:read guard now; tags have NO showcase of
+            # their own (the services showcase below carries tag
+            # titles as sorted title strings).
             ("GET", "/api/v1/public/photos"),
             # GH #600: the anonymous schedule list — minimal audience
             # schema, private rows excluded server-side.
@@ -242,6 +253,18 @@ class TestPublicRoutes:
             # audience schema, archived + non-public rows excluded
             # server-side.
             ("GET", "/api/v1/public/locations"),
+            # GH #606: the anonymous masters dictionary — minimal
+            # audience schema, only acting masters (masters.is_active)
+            # leave the server; the bare GET /masters entry left the
+            # allowlist with the #606 Task 3 cleanup (masters:read
+            # guard).
+            ("GET", "/api/v1/public/masters"),
+            # GH #606: the anonymous services dictionary — minimal
+            # audience schema, only active + is_public services leave
+            # the server; the bare GET /services entries left the
+            # allowlist with the #606 Task 3 cleanup (services:read
+            # guard).
+            ("GET", "/api/v1/public/services"),
             # GH #479 (Изменение 5): ("POST", "/api/v1/records") removed
             # from the allowlist — the route carries records:write now;
             # guest booking is #499.

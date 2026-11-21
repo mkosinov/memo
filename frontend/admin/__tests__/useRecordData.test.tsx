@@ -10,7 +10,6 @@ vi.mock('@memo/api-client', () => ({
   getClientVisitors: vi.fn(),
   getActivity: vi.fn(),
   getServices: vi.fn(),
-  getMasters: vi.fn(),
   getLocations: vi.fn(),
   getPayments: vi.fn(),
   getAllServices: vi.fn(),
@@ -23,7 +22,6 @@ import {
   getClientVisitors,
   getActivity,
   getServices,
-  getMasters,
   getLocations,
   getPayments,
   getAllServices,
@@ -223,7 +221,8 @@ describe('useRecordData', () => {
     );
 
     await waitFor(() => expect(getAllMasters).toHaveBeenCalled());
-    expect(getMasters).not.toHaveBeenCalled();
+    // #606: the paginated /masters getter is gone from the api-client —
+    // getAllMasters above is the only masters source.
   });
 
   it('calls getAllLocations (#205 T12 /all lookup)', async () => {

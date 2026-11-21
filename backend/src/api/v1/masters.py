@@ -11,6 +11,11 @@ free functions ``list_masters_view`` / ``list_all_masters_view`` directly
 with the session as an argument — no service dependency, no cached
 factories (the former ``_get_master_view_service`` / ``_ServiceDep`` are
 gone with the class).
+
+GH #606 Task 3: both GETs are staff-only (``masters:read``) — the bare
+paginated list left ``PUBLIC_ROUTES`` (#601 locations / #600 activities
+precedents); the anonymous dictionary is ``GET /api/v1/public/masters``
+(ADR-015 audience namespace, minimal 5-field schema).
 """
 
 from typing import Annotated, Any
@@ -35,12 +40,18 @@ _DEFAULT_ORDER: list[ColumnElement[Any]] = [
     asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id),
 ]
 
-# GH #247 (spec §3.7): the paginated list stays PUBLIC (PUBLIC_ROUTES —
-# schedule + client site); the private bare /all carries masters:read.
+# GH #606 Task 3 (#601 locations / #600 activities / #493 photos
+# precedents): the bare paginated list is staff-only (masters:read) —
+# the anonymous dictionary lives at GET /api/v1/public/masters
+# (ADR-015). /all already carried the guard.
 _READ_GUARD = [Depends(require_permission("masters:read"))]
 
 
-@router.get("", response_model=PaginatedResponse[MasterViewResponse])
+@router.get(
+    "",
+    response_model=PaginatedResponse[MasterViewResponse],
+    dependencies=_READ_GUARD,
+)
 async def list_masters(
     session: SessionDep,
     # Annotated[..., Query()], not Depends(): FastAPI classifies list-typed
@@ -56,6 +67,10 @@ async def list_masters(
     list contract, read side). Archived-master rows disappear from the
     list while their history keeps its names/colors (records snapshot).
     ``?id=`` (GH #232 §3.1) narrows by the view identity (staff_id).
+
+    The list is STAFF-ONLY since #606 Task 3 (masters:read guard
+    above) — the anonymous dictionary lives at
+    /api/v1/public/masters (ADR-015).
     """
     return await list_masters_view(
         db_session=session,

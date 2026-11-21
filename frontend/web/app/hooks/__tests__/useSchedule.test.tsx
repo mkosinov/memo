@@ -10,8 +10,13 @@ vi.mock('@memo/api-client', () => ({
   getPublicActivities: vi.fn(),
   // #600: staff route must no longer be called by the web schedule — kept as a spy.
   getActivities: vi.fn(),
+  // #606: services come from the PUBLIC dictionary (bare array); the staff
+  // route stays in the api-client (admin consumers) — kept as a spy.
+  getPublicServices: vi.fn(),
   getServices: vi.fn(),
-  getMasters: vi.fn(),
+  // #606: masters come from the PUBLIC dictionary (bare array); the paginated
+  // /masters getter is gone from the api-client — no staff spy left to keep.
+  getPublicMasters: vi.fn(),
   // #601: locations come from the PUBLIC dictionary — staff list kept as a spy.
   getPublicLocations: vi.fn(),
   getLocations: vi.fn(),
@@ -20,21 +25,26 @@ vi.mock('@memo/api-client', () => ({
 import {
   getPublicActivities,
   getActivities,
+  getPublicServices,
   getServices,
-  getMasters,
+  getPublicMasters,
   getPublicLocations,
   getLocations,
 } from '@memo/api-client';
 
 const mockedGetPublicActivities = getPublicActivities as Mock;
 const mockedGetActivities = getActivities as Mock;
+const mockedGetPublicServices = getPublicServices as Mock;
 const mockedGetServices = getServices as Mock;
-const mockedGetMasters = getMasters as Mock;
+const mockedGetPublicMasters = getPublicMasters as Mock;
 const mockedGetPublicLocations = getPublicLocations as Mock;
 const mockedGetLocations = getLocations as Mock;
 
 // ─── Sample data ────────────────────────────────────────────────────────────
 
+// #606: public services dictionary rows — exactly the 10 showcase fields
+// (ADR-015); tags are plain strings. The schedule builder must consume
+// only these (no duration/record_info/is_active/timestamps).
 const mockServices = [
   {
     id: 'svc-1',
@@ -44,17 +54,12 @@ const mockServices = [
     specialty: 'painting',
     min_age: 6,
     max_age: 99,
-    duration: 120,
-    record_info: 'Запись обязательна',
     materials: [
-      { id: 'mat-1', title: 'Акварель', description: 'Акварельные краски — бумага 300 г/м²', note: null },
-      { id: 'mat-2', title: 'Масло', description: 'Масляные краски — классика', note: 'Густые, сохнут долго' },
+      { title: 'Акварель', description: 'Акварельные краски — бумага 300 г/м²', note: null },
+      { title: 'Масло', description: 'Масляные краски — классика', note: 'Густые, сохнут долго' },
     ],
-    tariffs: [{ id: 't-1', service_id: 'svc-1', title: 'Стандарт', description: null, price: 3500 }],
-    tags: [{ id: 'tag-1', title: 'взрослым' }],
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
+    tariffs: [{ id: 't-1', title: 'Стандарт', price: 3500 }],
+    tags: ['взрослым'],
   },
   {
     id: 'svc-2',
@@ -64,29 +69,21 @@ const mockServices = [
     specialty: 'painting',
     min_age: 6,
     max_age: 99,
-    duration: 90,
-    record_info: '',
     materials: [],
-    tariffs: [{ id: 't-2', service_id: 'svc-2', title: 'Стандарт', description: null, price: 2800 }],
+    tariffs: [{ id: 't-2', title: 'Стандарт', price: 2800 }],
     tags: [],
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
   },
 ];
 
+// #606: public masters dictionary rows — exactly the 5 showcase fields
+// (name, specialty, photo); the schedule builder must consume only these.
 const mockMasters = [
   {
     id: 'm-1',
     first_name: 'Ольга',
     last_name: 'Середа',
-    color: '#E8D5B7',
-    position: 'Ведущий мастер',
     specialty: 'Живопись',
     avatar_url: null,
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
   },
 ];
 
@@ -165,8 +162,10 @@ function createWrapper() {
 
 function mockDefaultResolve(): void {
   mockedGetPublicActivities.mockResolvedValue({ items: mockActivities, total: mockActivities.length });
-  mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
-  mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
+  // #606: bare array — the public services dictionary has no paginated envelope.
+  mockedGetPublicServices.mockResolvedValue(mockServices);
+  // #606: bare array — the public masters dictionary has no paginated envelope.
+  mockedGetPublicMasters.mockResolvedValue(mockMasters);
   // #601: bare array — the public dictionary has no paginated envelope.
   mockedGetPublicLocations.mockResolvedValue(mockLocations);
 }
@@ -283,8 +282,12 @@ describe('useSchedule', () => {
     });
     // #600: staff-guarded /api/v1/activities must no longer be hit by the web schedule
     expect(mockedGetActivities).not.toHaveBeenCalled();
-    expect(mockedGetServices).toHaveBeenCalledTimes(1);
-    expect(mockedGetMasters).toHaveBeenCalledTimes(1);
+    // #606: services arrive via the public dictionary (bare array);
+    // the staff-guarded /api/v1/services must never be hit by the web.
+    expect(mockedGetPublicServices).toHaveBeenCalledTimes(1);
+    expect(mockedGetServices).not.toHaveBeenCalled();
+    // #606: masters arrive via the public dictionary (bare array).
+    expect(mockedGetPublicMasters).toHaveBeenCalledTimes(1);
     // #601: locations arrive via the public dictionary (bare array);
     // the staff-guarded /api/v1/locations must never be hit by the web.
     expect(mockedGetPublicLocations).toHaveBeenCalledTimes(1);
@@ -362,8 +365,8 @@ describe('useSchedule', () => {
 
   it('returns error when API fails', async () => {
     mockedGetPublicActivities.mockRejectedValue(new Error('Network error'));
-    mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
-    mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
+    mockedGetPublicServices.mockResolvedValue(mockServices);
+    mockedGetPublicMasters.mockResolvedValue(mockMasters);
     mockedGetPublicLocations.mockResolvedValue(mockLocations);
 
     const { result } = renderHook(() => useSchedule(), {
@@ -379,8 +382,8 @@ describe('useSchedule', () => {
 
   it('returns empty schedules when data is empty', async () => {
     mockedGetPublicActivities.mockResolvedValue({ items: [], total: 0 });
-    mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
-    mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
+    mockedGetPublicServices.mockResolvedValue(mockServices);
+    mockedGetPublicMasters.mockResolvedValue(mockMasters);
     mockedGetPublicLocations.mockResolvedValue([]);
 
     const { result } = renderHook(() => useSchedule(), {

@@ -26,12 +26,19 @@ from tests.conftest import query_db
 
 pytestmark = pytest.mark.api
 
+# GH #599 (merged contract): the direction is a dictionary REFERENCE —
+# ``specialty_id: UUID`` on every write shape. Schema tests use a
+# synthetic UUID (pydantic checks the type, not the FK); API tests
+# override it with the real ``default_specialty`` row id. The display
+# string ``specialty`` is read-only (responses only).
+_SPECIALTY_ID = "11111111-1111-1111-1111-111111111111"
+
 # Baseline create payload — the required ServiceBase scalars.
 _CREATE_PAYLOAD = {
     "title": "Мастерская",
     "description": "о",
     "image_url": "https://example.com/x.jpg",
-    "specialty": "живопись",
+    "specialty_id": _SPECIALTY_ID,
     "min_age": 6,
     "duration": 90,
     "record_info": "и",
@@ -93,6 +100,7 @@ class TestServiceSchemaIsPublic:
             updated_at=datetime(2025, 1, 1, tzinfo=UTC),
             is_active=True,
             is_public=False,
+            specialty="Живопись",
             **_CREATE_PAYLOAD,
         )
         dump = resp.model_dump()
@@ -110,7 +118,8 @@ class TestServiceSchemaIsPublic:
             title="Мастерская",
             description="о",
             image_url="https://example.com/x.jpg",
-            specialty="живопись",
+            specialty_id=_SPECIALTY_ID,
+            specialty="Живопись",
             min_age=6,
             max_age=None,
             duration=90,
@@ -133,28 +142,45 @@ class TestServiceSchemaIsPublic:
 class TestServiceApiIsPublic:
     """CRUD tests verifying is_public flows through the API."""
 
-    def test_create_service_with_is_public_false(self, api_client) -> None:
+    def test_create_service_with_is_public_false(
+        self, api_client, default_specialty
+    ) -> None:
         """POST /api/v1/services with is_public=false returns it."""
         resp = api_client.post(
             "/api/v1/services",
-            json={**_CREATE_PAYLOAD, "title": "Скрытая услуга", "is_public": False},
+            json={
+                **_CREATE_PAYLOAD,
+                "specialty_id": default_specialty["id"],
+                "title": "Скрытая услуга",
+                "is_public": False,
+            },
         )
         assert resp.status_code == 201, f"Create failed: {resp.text}"
         assert resp.json()["is_public"] is False
 
     def test_create_service_without_is_public_defaults_true(
-        self, api_client
+        self, api_client, default_specialty
     ) -> None:
         """POST /api/v1/services omitting is_public → true (back-compat)."""
-        resp = api_client.post("/api/v1/services", json=_CREATE_PAYLOAD)
+        resp = api_client.post(
+            "/api/v1/services",
+            json={**_CREATE_PAYLOAD, "specialty_id": default_specialty["id"]},
+        )
         assert resp.status_code == 201, f"Create failed: {resp.text}"
         assert resp.json()["is_public"] is True
 
-    def test_get_service_returns_is_public(self, api_client) -> None:
+    def test_get_service_returns_is_public(
+        self, api_client, default_specialty
+    ) -> None:
         """GET /api/v1/services/{id} includes is_public."""
         create_resp = api_client.post(
             "/api/v1/services",
-            json={**_CREATE_PAYLOAD, "title": "Глина", "is_public": False},
+            json={
+                **_CREATE_PAYLOAD,
+                "specialty_id": default_specialty["id"],
+                "title": "Глина",
+                "is_public": False,
+            },
         )
         svc_id = create_resp.json()["id"]
 
@@ -162,37 +188,58 @@ class TestServiceApiIsPublic:
         assert resp.status_code == 200
         assert resp.json()["is_public"] is False
 
-    def test_put_service_sets_is_public_false(self, api_client) -> None:
+    def test_put_service_sets_is_public_false(
+        self, api_client, default_specialty
+    ) -> None:
         """PUT /api/v1/services/{id} with is_public=false updates it."""
-        create_resp = api_client.post("/api/v1/services", json=_CREATE_PAYLOAD)
+        create_resp = api_client.post(
+            "/api/v1/services",
+            json={**_CREATE_PAYLOAD, "specialty_id": default_specialty["id"]},
+        )
         svc_id = create_resp.json()["id"]
         assert create_resp.json()["is_public"] is True
 
         resp = api_client.put(
             f"/api/v1/services/{svc_id}",
-            json={**_CREATE_PAYLOAD, "is_public": False},
+            json={
+                **_CREATE_PAYLOAD,
+                "specialty_id": default_specialty["id"],
+                "is_public": False,
+            },
         )
         assert resp.status_code == 200, f"PUT failed: {resp.text}"
         assert resp.json()["is_public"] is False
 
     def test_put_service_without_is_public_applies_default_true(
-        self, api_client
+        self, api_client, default_specialty
     ) -> None:
         """PUT omitting is_public → schema default true (full replacement)."""
         create_resp = api_client.post(
             "/api/v1/services",
-            json={**_CREATE_PAYLOAD, "is_public": False},
+            json={
+                **_CREATE_PAYLOAD,
+                "specialty_id": default_specialty["id"],
+                "is_public": False,
+            },
         )
         svc_id = create_resp.json()["id"]
         assert create_resp.json()["is_public"] is False
 
-        resp = api_client.put(f"/api/v1/services/{svc_id}", json=_CREATE_PAYLOAD)
+        resp = api_client.put(
+            f"/api/v1/services/{svc_id}",
+            json={**_CREATE_PAYLOAD, "specialty_id": default_specialty["id"]},
+        )
         assert resp.status_code == 200, f"PUT failed: {resp.text}"
         assert resp.json()["is_public"] is True
 
-    def test_patch_service_sets_is_public_false(self, api_client) -> None:
+    def test_patch_service_sets_is_public_false(
+        self, api_client, default_specialty
+    ) -> None:
         """PATCH /api/v1/services/{id} with is_public=false updates it."""
-        create_resp = api_client.post("/api/v1/services", json=_CREATE_PAYLOAD)
+        create_resp = api_client.post(
+            "/api/v1/services",
+            json={**_CREATE_PAYLOAD, "specialty_id": default_specialty["id"]},
+        )
         svc_id = create_resp.json()["id"]
 
         resp = api_client.patch(
@@ -203,12 +250,16 @@ class TestServiceApiIsPublic:
         assert resp.json()["is_public"] is False
 
     def test_patch_service_without_is_public_keeps_false(
-        self, api_client
+        self, api_client, default_specialty
     ) -> None:
         """PATCH omitting is_public leaves a hidden service hidden."""
         create_resp = api_client.post(
             "/api/v1/services",
-            json={**_CREATE_PAYLOAD, "is_public": False},
+            json={
+                **_CREATE_PAYLOAD,
+                "specialty_id": default_specialty["id"],
+                "is_public": False,
+            },
         )
         svc_id = create_resp.json()["id"]
 
@@ -222,12 +273,16 @@ class TestServiceApiIsPublic:
         assert body["is_public"] is False
 
     def test_patch_service_explicit_null_is_public_keeps_value(
-        self, api_client
+        self, api_client, default_specialty
     ) -> None:
         """PATCH {"is_public": null} means 'don't change' (NOT NULL guard)."""
         create_resp = api_client.post(
             "/api/v1/services",
-            json={**_CREATE_PAYLOAD, "is_public": False},
+            json={
+                **_CREATE_PAYLOAD,
+                "specialty_id": default_specialty["id"],
+                "is_public": False,
+            },
         )
         svc_id = create_resp.json()["id"]
 
@@ -238,11 +293,18 @@ class TestServiceApiIsPublic:
         assert resp.status_code == 200, f"PATCH failed: {resp.text}"
         assert resp.json()["is_public"] is False
 
-    def test_list_services_includes_is_public(self, api_client) -> None:
+    def test_list_services_includes_is_public(
+        self, api_client, default_specialty
+    ) -> None:
         """GET /api/v1/services returns is_public in list items."""
         api_client.post(
             "/api/v1/services",
-            json={**_CREATE_PAYLOAD, "title": "Hidden", "is_public": False},
+            json={
+                **_CREATE_PAYLOAD,
+                "specialty_id": default_specialty["id"],
+                "title": "Hidden",
+                "is_public": False,
+            },
         )
         resp = api_client.get("/api/v1/services")
         assert resp.status_code == 200
@@ -282,15 +344,24 @@ def actor(real_user):
 
 
 def _insert_service(
-    svc_id: str, title: str, specialty: str = "живопись"
+    svc_id: str, title: str, specialty_id: str = _SPECIALTY_ID
 ) -> None:
-    """Seed a service row directly (no service call → no journal row)."""
+    """Seed a service row directly (no service call → no journal row).
+
+    GH #599: ``specialty`` is gone from the table — the service carries a
+    ``specialty_id`` FK, so the dictionary row is seeded first (fixed id,
+    OR IGNORE keeps a second call idempotent)."""
     query_db(
-        f"INSERT INTO services (id, title, description, image_url, specialty, "
-        f"min_age, duration, record_info, is_active, is_public, created_at, "
-        f"updated_at) VALUES ('{svc_id}', '{title}', 'о', "
-        f"'https://e.com/x.jpg', '{specialty}', 6, 90, 'и', 1, 1, "
+        f"INSERT OR IGNORE INTO specialties (id, title, created_at, "
+        f"updated_at) VALUES ('{_SPECIALTY_ID}', 'Живопись', "
         f"datetime('now'), datetime('now'))"
+    )
+    query_db(
+        f"INSERT INTO services (id, title, description, image_url, "
+        f"specialty_id, min_age, duration, record_info, is_active, "
+        f"is_public, created_at, updated_at) VALUES ('{svc_id}', "
+        f"'{title}', 'о', 'https://e.com/x.jpg', '{specialty_id}', 6, 90, "
+        f"'и', 1, 1, datetime('now'), datetime('now'))"
     )
 
 
@@ -335,7 +406,7 @@ class TestServiceAuditIsPublic:
                 title="Неизменное название",
                 description="о",
                 image_url="https://e.com/x.jpg",
-                specialty="живопись",
+                specialty_id=_SPECIALTY_ID,
                 min_age=6,
                 duration=90,
                 record_info="и",

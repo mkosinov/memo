@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from src.db.base import Base
 from src.db.database import DBManager
-from src.models import Location, Position, Service
+from src.models import Location, Position, Service, Specialty
 from src.seed.reference import (
     DEFAULT_DIR,
     Summary,
@@ -142,6 +142,17 @@ def test_shipped_locations_yaml_all_public_and_check_converges() -> None:
 # GH #606 — services ``is_public`` (mirror of the locations section above)
 # ---------------------------------------------------------------------------
 
+# GH #599: services.yaml references specialties BY TITLE — the loader
+# resolves them case-insensitively against the specialties.yaml
+# dictionary (unknown title → load error), so the fixture dir must
+# declare every title the services section uses (the
+# test_seed_reference_specialties.py pattern).
+SPECIALTIES_YAML = """\
+specialties:
+  - Живопись
+  - Керамика
+"""
+
 # Fixture template with BOTH polarities — at least one ``is_public: false``
 # row, otherwise a loader that silently skips the column stays green.
 SERVICES_YAML = """\
@@ -167,6 +178,7 @@ services:
 
 @pytest.fixture
 def services_yaml_dir(tmp_path: Path) -> Path:
+    (tmp_path / "specialties.yaml").write_text(SPECIALTIES_YAML, encoding="utf-8")
     (tmp_path / "services.yaml").write_text(SERVICES_YAML, encoding="utf-8")
     return tmp_path
 
@@ -204,12 +216,18 @@ async def test_re_run_updates_service_is_public_in_place(
     column leaves the row untouched (unchanged, not updated).
     """
     async with db_manager.async_session() as session:
+        # GH #599: the direction is a NOT NULL FK — seed the dictionary
+        # row first (the yaml «Керамика» upsert then finds it by
+        # lower(title), so ``specialty_id`` survives the re-run unchanged)
+        # and link the pre-existing service to it (the ORM ``specialty``
+        # is a read-only property, not a column).
+        session.add(Specialty(id="spec-ceramics", title="Керамика"))
         session.add(
             Service(
                 title="Закулисная услуга",
                 description="Скрыта с сайта",
                 image_url="/images/card-animals.jpg",
-                specialty="керамика",
+                specialty_id="spec-ceramics",
                 min_age=5,
                 duration=60,
                 record_info="",

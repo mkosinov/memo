@@ -92,6 +92,10 @@ import {
   LocationAllResponseSchema,
   LocationPublicListResponseSchema,
   type LocationPublicListResponse,
+  MasterPublicListResponseSchema,
+  type MasterPublicListResponse,
+  ServicePublicListResponseSchema,
+  type ServicePublicListResponse,
   ServiceAllResponseSchema,
   TagAllResponseSchema,
   MaterialAllResponseSchema,
@@ -220,6 +224,13 @@ function resolveDeleteBody(
 
 export async function getMasters(params?: ListParams): Promise<PaginatedResponse<MasterViewResponse>> {
   return api(`/api/v1/masters${listQuery(params)}`, MasterViewListResponseSchema);
+}
+
+/** #606 / ADR-015: anonymous masters dictionary for the client site —
+ * bare array of 5-field rows, no parameters; archived rows are excluded
+ * server-side. */
+export async function getPublicMasters(): Promise<MasterPublicListResponse> {
+  return api('/api/v1/public/masters', MasterPublicListResponseSchema);
 }
 
 // ─── Staff (GH #266 — the full staff directory) ───────────────────────────
@@ -491,6 +502,13 @@ export async function resolveDeletePhoto(id: string, payload: ResolveDeletePhoto
 
 export async function getServices(params?: ListParams): Promise<PaginatedResponse<ServiceResponse>> {
   return api(`/api/v1/services${listQuery(params)}`, ServiceListResponseSchema);
+}
+
+/** #606 / ADR-015: anonymous services dictionary for the client site —
+ * bare array, no parameters; archived and hidden (is_public=false) rows
+ * are excluded server-side. */
+export async function getPublicServices(): Promise<ServicePublicListResponse> {
+  return api('/api/v1/public/services', ServicePublicListResponseSchema);
 }
 
 // ─── Activities ────────────────────────────────────────────────────────────

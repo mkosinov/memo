@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, ActivityPublicListResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, LocationPublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getPublicMasters, getPublicServices, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, ActivityPublicListResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, LocationPublicListResponseSchema, MasterPublicListResponseSchema, ServicePublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -39,6 +39,17 @@ describe('getMasters', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
     await getMasters({ per_page: 100 });
     expect(api).toHaveBeenCalledWith('/api/v1/masters?per_page=100', expect.anything());
+  });
+});
+
+describe('getPublicMasters (#606: /api/v1/public/masters)', () => {
+  it('calls the anonymous dictionary bare — no params, bare-array schema', async () => {
+    vi.mocked(api).mockResolvedValueOnce([]);
+    await getPublicMasters();
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/masters',
+      MasterPublicListResponseSchema,
+    );
   });
 });
 
@@ -318,11 +329,22 @@ describe('getServices', () => {
   });
 
   it('composes material_id with status and pagination (GH #223)', async () => {
-    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 50 });
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 50 });
     await getServices({ status: 'active', material_id: 'm-1', page: 2, per_page: 50 });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/services?page=2&per_page=50&status=active&material_id=m-1',
       expect.anything(),
+    );
+  });
+});
+
+describe('getPublicServices (#606: /api/v1/public/services)', () => {
+  it('calls the anonymous dictionary bare — no params, bare-array schema', async () => {
+    vi.mocked(api).mockResolvedValueOnce([]);
+    await getPublicServices();
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/services',
+      ServicePublicListResponseSchema,
     );
   });
 });
@@ -2872,6 +2894,43 @@ describe('ActivityResponseSchema service_title (GH #212)', () => {
   it('parses when service_title is absent (backward-compatible)', () => {
     const result = ActivityResponseSchema.parse(baseActivity);
     expect(result.service_title).toBeUndefined();
+  });
+});
+
+// ─── Public dictionary schemas (#606, ADR-015 — spec §3.1/§3.2 mirrors) ─────
+
+describe('MasterPublicListResponseSchema (#606)', () => {
+  it('parses a bare array of 5-field master rows, avatar_url nullable', () => {
+    const result = MasterPublicListResponseSchema.parse([
+      { id: 'm-1', first_name: 'Анна', last_name: 'Иванова', specialty: 'Керамика', avatar_url: 'https://cdn.example/avatar.jpg' },
+      { id: 'm-2', first_name: 'Иван', last_name: 'Петров', specialty: 'Живопись', avatar_url: null },
+    ]);
+    expect(result).toHaveLength(2);
+    expect(result[0].avatar_url).toBe('https://cdn.example/avatar.jpg');
+    expect(result[1].avatar_url).toBeNull();
+  });
+});
+
+describe('ServicePublicListResponseSchema (#606)', () => {
+  it('parses nested tariffs/materials and plain string tags, max_age nullable', () => {
+    const result = ServicePublicListResponseSchema.parse([
+      {
+        id: 's-1',
+        title: 'Гончарный круг',
+        description: 'Мастер-класс на гончарном круге',
+        image_url: 'https://cdn.example/s1.jpg',
+        specialty: 'Керамика',
+        min_age: 6,
+        max_age: null,
+        tariffs: [{ id: 't-1', title: 'Базовый', price: 1500 }],
+        materials: [{ title: 'Глина', description: 'Входит в стоимость', note: null }],
+        tags: ['детям', 'керамика'],
+      },
+    ]);
+    expect(result[0].max_age).toBeNull();
+    expect(result[0].tariffs[0]).toEqual({ id: 't-1', title: 'Базовый', price: 1500 });
+    expect(result[0].materials[0].note).toBeNull();
+    expect(result[0].tags).toEqual(['детям', 'керамика']);
   });
 });
 

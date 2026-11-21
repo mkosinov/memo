@@ -6,10 +6,12 @@ import { Menubar } from '../app/components/layout/Menubar';
 import { UIProvider } from '../contexts/UIContext';
 import { DAYS_FULL, MONTHS_GENITIVE } from '../lib/utils';
 
-vi.mock('@memo/api-client', async () => {
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
   const { mockMastersApiAll } = await import('./helpers/mockData');
   const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
   return ({
+  ...actual,
   getAllMasters: vi.fn().mockResolvedValue(mockMastersApiAll),
   getAllLocations: vi.fn().mockResolvedValue([]),
   getAllServices: vi.fn().mockResolvedValue([]),

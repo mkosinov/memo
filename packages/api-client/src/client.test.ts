@@ -415,6 +415,92 @@ describe('api() request timeouts', () => {
   });
 });
 
+// ─── Relative API base (GH #616 prod deploy) ─────────────────────────────────
+// Production builds bake NEXT_PUBLIC_API_URL='/api': the API is mounted
+// same-origin behind the host nginx (#617 proxies '/api' WITHOUT rewriting —
+// backend routes already live under /api), so a relative base is the public
+// mount point and must NOT double the '/api' prefix every endpoint path
+// already carries. Dev keeps the absolute fallback (http://<host>:8000),
+// and absolute bases (dev/e2e pins) keep plain concatenation.
+// API_BASE is baked at module load, so each case re-imports the module
+// under a freshly set env.
+
+describe('relative API base (GH #616)', () => {
+  const ORIG_ENV = process.env.NEXT_PUBLIC_API_URL;
+
+  async function importClient(): Promise<typeof import('./client')> {
+    vi.resetModules();
+    return import('./client');
+  }
+
+  afterEach(() => {
+    if (ORIG_ENV === undefined) delete process.env.NEXT_PUBLIC_API_URL;
+    else process.env.NEXT_PUBLIC_API_URL = ORIG_ENV;
+    vi.resetModules();
+  });
+
+  it('does not double the /api prefix when NEXT_PUBLIC_API_URL is relative', async () => {
+    process.env.NEXT_PUBLIC_API_URL = '/api';
+    const { api } = await importClient();
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/api/v1/records', schema);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/records');
+  });
+
+  it('prepends a relative base when the path does not already start with it', async () => {
+    process.env.NEXT_PUBLIC_API_URL = '/api';
+    const { api } = await importClient();
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/v1/records', schema);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/records');
+  });
+
+  it('keeps eventsUrl same-origin and undoubled with a relative base', async () => {
+    process.env.NEXT_PUBLIC_API_URL = '/api';
+    const { eventsUrl } = await importClient();
+    expect(eventsUrl).toBe('/api/v1/events');
+  });
+
+  it('keeps plain concatenation for absolute bases (dev/e2e pinning)', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8010';
+    const { api } = await importClient();
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/api/v1/records', schema);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8010/api/v1/records');
+  });
+
+  it('strips a trailing slash from an absolute base before concatenating', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8010/';
+    const { api } = await importClient();
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/api/v1/records', schema);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8010/api/v1/records');
+  });
+
+  it('keeps the dev fallback base untouched when the env is unset (server side)', async () => {
+    delete process.env.NEXT_PUBLIC_API_URL;
+    const { api } = await importClient();
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/api/v1/records', schema);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/v1/records');
+  });
+});
+
 // ─── 409 dependency-tree exposure (GH #207 §5) ────────────────────────────────
 // The unified DELETE dry-run answers {detail: "has_dependencies", dependencies: [...]}.
 // The hook layer needs the tree to render the delete dialog (§7), so ApiError

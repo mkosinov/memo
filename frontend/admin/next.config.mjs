@@ -38,15 +38,40 @@ function avatarRemotePatterns() {
   return patterns;
 }
 
+// GH #616: a RELATIVE NEXT_PUBLIC_API_URL (prod bake: '/api' — the API is
+// mounted same-origin behind the host nginx, #617 proxies without rewriting)
+// means there is no remote image host at all: images are served unoptimized
+// straight from the API origin (spec §3.1 — «unoptimized убирает
+// remotePatterns, домен не вшит никуда»). An ABSOLUTE base or no base at
+// all (dev/e2e fallback) keeps the GH #301 optimizer + remotePatterns
+// exactly as before — dev is untouched.
+function isRelativeApiBase() {
+  const raw = process.env.NEXT_PUBLIC_API_URL || '';
+  return raw !== '' && !/^[a-z][a-z0-9+.-]*:/i.test(raw) && !raw.startsWith('//');
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // GH #616: standalone emits a self-contained runtime (.next/standalone)
+  // for the Docker image — Task 3's Dockerfile copies it and adds public/
+  // and .next/static (standalone famously excludes both). NOTE: in this
+  // pnpm workspace the standalone tree roots at the WORKSPACE root — the
+  // server entry is .next/standalone/frontend/admin/server.js. `next dev`
+  // ignores `output`, and the shard e2e stacks run `next dev`, so dev/e2e
+  // do not change.
+  output: 'standalone',
+  // basePath ONLY from the NEXT_PUBLIC_BASE_PATH build arg (prod bake:
+  // '/admin'). Unset in dev — no basePath key at all, URLs stay as before.
+  ...(process.env.NEXT_PUBLIC_BASE_PATH
+    ? { basePath: process.env.NEXT_PUBLIC_BASE_PATH }
+    : {}),
   allowedDevOrigins: ['imac.local', 'localhost', '127.0.0.1', '*.local'],
   // Шардовые e2e-сборки (scripts/e2e-shard-start.sh) изолируются через NEXT_DIST_DIR.
   // ВАЖНО: не включать --turbo шарду — Turbopack кладёт кэш вне distDir, изоляция сломается.
   distDir: process.env.NEXT_DIST_DIR || '.next',
-  images: {
-    remotePatterns: avatarRemotePatterns(),
-  },
+  images: isRelativeApiBase()
+    ? { unoptimized: true }
+    : { remotePatterns: avatarRemotePatterns() },
   // GH #384: never report the page address to third parties (Referer) —
   // table-filter text lands in URLs (#349), and per-link rel="noreferrer"
   // only covers those specific anchors. A page-level policy covers links,

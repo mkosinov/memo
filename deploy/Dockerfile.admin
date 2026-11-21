@@ -27,8 +27,11 @@
 FROM node:26-alpine AS build
 
 # pnpm pinned to root package.json `packageManager` (Node 26 images ship
-# without corepack).
-RUN npm install -g pnpm@11.5.1
+# without corepack). bash because the root postinstall (install-hooks.sh) is
+# invoked as `bash scripts/...` and alpine ships /bin/sh only — the hook is
+# useless in a container, but making it conditional would touch every dev
+# install; the image-local dep is the smaller blast radius.
+RUN apk add --no-cache bash && npm install -g pnpm@11.5.1
 
 # Public build args → ENV BEFORE `next build`: Next inlines NEXT_PUBLIC_* at
 # build time; the relative /api base also flips images to unoptimized
@@ -43,8 +46,8 @@ WORKDIR /repo
 
 # Deps layer (cached unless manifests/lockfile change). All four workspace
 # manifests must exist for pnpm to resolve the workspace graph; scripts/
-# because the root postinstall (install-hooks.sh) runs on install and is
-# git-safe (skips cleanly without a .git).
+# because the root postinstall (install-hooks.sh) runs on install (bash is
+# installed for it above; the hook itself skips cleanly without a .git).
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY scripts ./scripts
 COPY frontend/admin/package.json frontend/admin/

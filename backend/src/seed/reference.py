@@ -67,7 +67,7 @@ from src.models.specialty import staff_specialties
 from src.models.tag import location_tags, master_tags, service_tags
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from typing import Any, Self
 
     from sqlalchemy import Table
@@ -116,7 +116,10 @@ class TariffIn(_In):
     title: str = Field(min_length=1, max_length=100)
     description: str | None = None
     price: int = Field(ge=0)
-    audience: TariffAudience = TariffAudience.ALL
+    # No silent default: spec §4.4 — audience is strictly kid/adult/all and
+    # an empty cell must be an error, so the parser always supplies the
+    # parsed literal.
+    audience: TariffAudience
 
 
 class MaterialLinkIn(_In):
@@ -290,6 +293,10 @@ class _ParsedCsv:
     specialties: list[_CsvRow]
     seen: set[str] = field(default_factory=set)
     last_line: int = 0
+    # Extra (out-of-contract) header columns — spec §4.5: a warning naming
+    # «section + column», collected during the parse and reported as an
+    # end-of-run list instead of inline noise (plan Task 1).
+    extra_columns: list[tuple[str, str, int]] = field(default_factory=list)
 
 
 def _format_error(error: Mapping[str, Any]) -> str:
@@ -411,10 +418,7 @@ def _parse_csv(path: Path) -> _ParsedCsv:
                         )
                     for name in header:
                         if name not in expected:
-                            print(
-                                f"  ! лишняя колонка {active}.{name} "
-                                f"(строка {start_line}) — проигнорирована"
-                            )
+                            parsed.extra_columns.append((active, name, start_line))
                     columns = header
                     header_width = len(raw)
                     needs_header = False
@@ -488,6 +492,20 @@ def _boolean(row: _CsvRow, column: str, *, empty_default: bool | None = None) ->
     raise SeedDataError(
         f"строка {row.line} ({row.section}): в колонке {column} ожидалось True или False"
     )
+
+
+def _audience(row: _CsvRow) -> TariffAudience:
+    """Source-typed audience (spec §4.4, the int/bool league): strictly
+    kid/adult/all, empty or anything else is a Russian operator error —
+    no English pydantic message, no silent default."""
+    value = row.cells["audience"].strip()
+    try:
+        return TariffAudience(value)
+    except ValueError:
+        raise SeedDataError(
+            f"строка {row.line} ({row.section}): в колонке audience "
+            f"ожидалось kid, adult или all, получено {value!r}"
+        ) from None
 
 
 def _list_cell(value: str) -> list[str]:
@@ -568,8 +586,18 @@ def _read_entity_sections(
     tags = [_required(row, "title") for row in parsed.sections.get("tags", [])]
     for title, row in zip(tags, parsed.sections.get("tags", []), strict=True):
         line_by_entity[("tags", title)] = row.line
-    specialties = [_required(row, "title") for row in parsed.specialties]
-    for title, row in zip(specialties, parsed.specialties, strict=True):
+    specialties: list[str] = []
+    for row in parsed.specialties:
+        title = _required(row, "title")
+        # Domain rules (specialties.md): every dictionary title is bound by
+        # SPECIALTY_MAX — the String(100) column width — so an over-long
+        # value is a clean load error, not a raw DB error.
+        if len(title) > SPECIALTY_MAX:
+            raise SeedDataError(
+                f"строка {row.line} (specialty): название направления "
+                f"не должно быть длиннее {SPECIALTY_MAX} символов"
+            )
+        specialties.append(title)
         line_by_entity[("specialty", title)] = row.line
 
     staff: list[StaffIn] = []
@@ -673,7 +701,7 @@ def _attach_service_children(
                 "title": row.cells["title"],
                 "description": row.cells["description"],
                 "price": _integer(row, "price"),
-                "audience": row.cells["audience"],
+                "audience": _audience(row),
             },
             row,
         )
@@ -708,16 +736,24 @@ def _attach_service_children(
         )
 
 
-def _check_unique(values: list[str], what: str, lines: dict[str, int] | None = None) -> None:
+def _check_unique(
+    values: list[str],
+    what: str,
+    lines: dict[str, int] | None = None,
+    *,
+    key: Callable[[str], str] | None = None,
+) -> None:
+    normalize = key or str
     seen: set[str] = set()
     for value in values:
-        if value in seen:
+        normalized = normalize(value)
+        if normalized in seen:
             line = lines.get(value, 0) if lines else 0
             prefix = f"строка {line}: " if line else ""
             raise SeedDataError(
                 f"{prefix}{what}: значение «{value}» встречается дважды — уберите дубль"
             )
-        seen.add(value)
+        seen.add(normalized)
 
 
 def _check_refs(owner: str, refs: list[str], known: set[str], source: str, line: int) -> None:
@@ -737,6 +773,15 @@ def _load_csv_data(parsed: _ParsedCsv) -> ReferenceData:
         data.tags,
         "секция tags",
         {title: line_by_entity[("tags", title)] for title in data.tags},
+    )
+    # GH #599: two titles equal modulo case are one dictionary row (the
+    # DB's lower(title) unique index) — a CI pair in the section is a load
+    # error (domain rules specialties.md), same as any other natural key.
+    _check_unique(
+        data.specialties,
+        "секция specialty",
+        {title: line_by_entity[("specialty", title)] for title in data.specialties},
+        key=str.lower,
     )
     _check_unique(
         [item.title for item in data.materials],
@@ -833,6 +878,11 @@ def _load_csv_data(parsed: _ParsedCsv) -> ReferenceData:
         f"направлений {len(data.specialties)}, сотрудников {len(data.staff)}, "
         f"должностей {len(data.positions)}"
     )
+    # Spec §4.5: extra columns are a warning listing «section + column» —
+    # reported as an end-of-run list (plan Task 1), in every mode that
+    # loads the file (check / dry-run / apply).
+    for section, column, line in parsed.extra_columns:
+        print(f"  ! лишняя колонка {section}.{column} (строка {line}) — проигнорирована")
     return data
 
 

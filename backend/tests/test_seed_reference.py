@@ -19,6 +19,7 @@ from src.db.database import DBManager
 from src.models import Location, Position
 from src.seed.reference import (
     DEFAULT_CSV,
+    SPECIALTY_MAX,
     SeedDataError,
     Summary,
     apply_reference_data,
@@ -329,3 +330,93 @@ def test_missing_section_is_reported_with_csv_line(csv_path: Path) -> None:
         SeedDataError, match=r"строка .* отсутствуют обязательные секции: specialty"
     ):
         load_reference_data(csv_path)
+
+
+# ---------------------------------------------------------------------------
+# Audit vs spec §4 (subtask 1.2): dictionary-section bounds (#599 contract)
+# and operator-facing Russian errors for source-typed columns.
+# ---------------------------------------------------------------------------
+
+
+def test_specialty_title_over_column_width_fails_with_line(csv_path: Path) -> None:
+    """A dictionary title beyond the String(100) column fails at PARSE time —
+    a clean SeedDataError with the record line, not a raw DB error
+    (domain rules specialties.md: the SPECIALTY_MAX bound ServiceIn and
+    MasterIn already carry, mirrored for the dictionary itself)."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("\n;Графика", f"\n;{'А' * (SPECIALTY_MAX + 1)}"))
+
+    with pytest.raises(
+        SeedDataError, match=rf"строка 36 \(specialty\).*длиннее {SPECIALTY_MAX} символов"
+    ):
+        load_reference_data(csv_path)
+
+
+def test_specialty_section_ci_duplicates_fail_load(csv_path: Path) -> None:
+    """Two titles equal modulo case are one dictionary row (the DB's
+    lower(title) unique index) — the section must not list the pair."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("\n;Графика", "\n;Графика\n;ГРАФИКА"))
+
+    with pytest.raises(SeedDataError, match=r"строка 37.*дважды"):
+        load_reference_data(csv_path)
+
+
+def test_tariff_audience_invalid_value_russian_error(csv_path: Path) -> None:
+    """``audience`` is source-typed (spec §4.4, same league as int/bool):
+    anything outside kid/adult/all — including empty — is a Russian
+    operator-facing error, not a wrapped English pydantic message."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace(";1000;all", ";1000;подростки"))
+
+    with pytest.raises(SeedDataError, match=r"строка 19 .*kid, adult или all"):
+        load_reference_data(csv_path)
+
+
+def test_extra_column_warning_printed_after_summary(
+    csv_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Extra-column warnings form an end-of-run list (plan Task 1) — printed
+    after the loading summary, not inline mid-parse."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";record_info;tags\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";record_info;tags;legacy_flag\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;unused",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    load_reference_data(csv_path)
+    out = capsys.readouterr().out
+    assert out.index("лишняя колонка services.legacy_flag") > out.index("локаций")
+
+
+def test_multiline_quoted_field_error_cites_record_start(csv_path: Path) -> None:
+    """A quoted field may span physical lines (spec §4.1); an error inside
+    such a record must cite the record's START line (§6 test 3)."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ';Линогравюра для примера;"многострочное\nописание";;Графика;много;;90;;пример',
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(SeedDataError, match=r"строка 7 .*min_age"):
+        load_reference_data(csv_path)
+
+
+def test_services_is_public_column_is_extra_and_ignored(
+    csv_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``is_public`` is NOT in the services contract (spec §4.2): the column
+    falls under the generic extra-column warning and the model keeps its
+    default (GH #606 left services visibility admin-side for the loader)."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";record_info;tags\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";record_info;tags;is_public\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;False",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert data.services[0].is_public is True
+    assert "лишняя колонка services.is_public" in capsys.readouterr().out

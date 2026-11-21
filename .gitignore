@@ -42,6 +42,9 @@ coverage/
 # Seed canon dumps — contain user table data: phones, password hashes (GH #373)
 *.canon.sql
 
+# Production seed CSV may contain staff names and addresses.
+/prod-seed.csv
+
 # TypeScript
 *.tsbuildinfo
 
@@ -79,6 +82,10 @@ docker-compose.override.yml
 .claude/
 local-images/
 token-usage-output.txt
+
+# ZCode session artifacts (auto-generated plan file + tool-local ignore copy)
+.zcode/plans/
+.zcodeignore
 
 # Turborepo cache
 .turbo/

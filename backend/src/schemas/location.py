@@ -58,7 +58,7 @@ class LocationBase(BaseModel):
 class LocationCreate(LocationBase):
     """Request schema for creating a new location."""
 
-    # GH #551 rev.3 (user decision 2026-11-13): capacity 0–99 on every
+    # GH #551 rev.3 (user decision 2026-11-13): capacity 0-99 on every
     # write path (прежний предел 500 отменён); 0 = «вместимость не
     # задана». Deliberately NOT on LocationBase — LocationResponse
     # inherits it and read schemas stay unbounded so legacy
@@ -76,7 +76,7 @@ class LocationUpdate(LocationBase):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Same 0–99 range as LocationCreate (GH #551); read schemas unbounded.
+    # Same 0-99 range as LocationCreate (GH #551); read schemas unbounded.
     capacity: int = Field(ge=0, le=99)
 
 
@@ -95,7 +95,7 @@ class LocationPatch(BaseModel):
     short_title: str | None = None
     address: str | None = None
     description: str | None = None
-    # GH #551: 0–99 when sent; absent key leaves the stored value alone.
+    # GH #551: 0-99 when sent; absent key leaves the stored value alone.
     capacity: int | None = Field(default=None, ge=0, le=99)
     yandex_map_url: str | None = None
     review_url: str | None = None

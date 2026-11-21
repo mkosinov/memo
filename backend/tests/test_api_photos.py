@@ -682,6 +682,111 @@ class TestPublicPhotosServiceFilter:
         assert {p["id"] for p in filtered.json()["items"]} <= set(got)
 
 
+# ─── GH #606: photos of hidden/archived services vanish from the gallery ──────
+
+
+@pytest.fixture()
+def service_visibility_showcase_fixture(
+    api_client, create_service, create_activity,
+):
+    """#606 §3.6 сетап: скрытая + архивная + контрольная услуги; прямые
+    фото и фото занятий для каждой; все фото публичные.
+
+    Занятия сеются ДО архивирования (архив — просто флип ``is_active``,
+    но порядок устойчив к любым create-time гардам).
+    """
+    s_ctl = create_service(title="Gallery Visible Control")
+    s_hidden = create_service(title="Gallery Hidden Twin", is_public=False)
+    s_archived = create_service(title="Gallery Archived Twin")
+    a_ctl = create_activity(service_id=s_ctl["id"])
+    a_hidden = create_activity(service_id=s_hidden["id"])
+    a_archived = create_activity(service_id=s_archived["id"])
+    resp = api_client.post(f"/api/v1/services/{s_archived['id']}/archive")
+    assert resp.status_code == 200, resp.text
+
+    def post_photo(filename: str, **extra: object) -> dict:
+        r = api_client.post(
+            PHOTOS_URL, json={"filename": filename, "is_public": True, **extra}
+        )
+        assert r.status_code == 201, (
+            f"photo POST failed: {r.status_code}: {r.text}"
+        )
+        return r.json()
+
+    return {
+        "s_ctl": s_ctl, "s_hidden": s_hidden, "s_archived": s_archived,
+        # control: visible service — direct + via activity
+        "ctl_direct": post_photo("g_ctl_direct.jpg", service_id=s_ctl["id"]),
+        "ctl_via": post_photo("g_ctl_via.jpg", activity_id=a_ctl["id"]),
+        # hidden service (is_public=false): direct + via activity
+        "hidden_direct": post_photo(
+            "g_hidden_direct.jpg", service_id=s_hidden["id"]
+        ),
+        "hidden_via": post_photo(
+            "g_hidden_via.jpg", activity_id=a_hidden["id"]
+        ),
+        # archived service (is_active=false): direct + via activity
+        "archived_direct": post_photo(
+            "g_archived_direct.jpg", service_id=s_archived["id"]
+        ),
+        "archived_via": post_photo(
+            "g_archived_via.jpg", activity_id=a_archived["id"]
+        ),
+    }
+
+
+class TestPublicPhotosServiceVisibility:
+    """GH #606 §3.6: термины видимости услуги-владельца в предикате
+    галереи — общий фид И сужение ``?service_id=`` (прямые фото услуги и
+    фото её занятий исчезают; зонд скрытого id — пустой ответ, паритет с
+    несуществующим)."""
+
+    def test_feed_hides_hidden_and_archived_service_photos(
+        self, anon_client, service_visibility_showcase_fixture
+    ) -> None:
+        """Общий фид: фото скрытой и архивной услуг (прямые и через
+        занятия) отсутствуют; контрольная пара видимой услуги — тут."""
+        fx = service_visibility_showcase_fixture
+        resp = anon_client.get("/api/v1/public/photos", params={"per_page": 100})
+        assert resp.status_code == 200, resp.text
+        ids = {p["id"] for p in resp.json()["items"]}
+        # positive control: the visible-service pair IS here
+        assert fx["ctl_direct"]["id"] in ids, "control direct photo missing"
+        assert fx["ctl_via"]["id"] in ids, "control via photo missing"
+        # hidden service: neither direct nor via-activity photos
+        assert fx["hidden_direct"]["id"] not in ids, "hidden direct leaked"
+        assert fx["hidden_via"]["id"] not in ids, "hidden via leaked"
+        # archived service: neither direct nor via-activity photos
+        assert fx["archived_direct"]["id"] not in ids, "archived direct leaked"
+        assert fx["archived_via"]["id"] not in ids, "archived via leaked"
+        assert resp.json()["total"] == 2
+
+    def test_service_id_probe_hidden_and_archived_empty_control_present(
+        self, anon_client, service_visibility_showcase_fixture
+    ) -> None:
+        """Зонд ``?service_id=``: скрытый и архивный id — пустой ответ
+        (200, не 404 — паритет с несуществующим); контрольный id — обе
+        фотографии (прямая + занятие)."""
+        fx = service_visibility_showcase_fixture
+        for key in ("s_hidden", "s_archived"):
+            resp = anon_client.get(
+                "/api/v1/public/photos", params={"service_id": fx[key]["id"]}
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["items"] == [], f"{key} probe not empty"
+            assert resp.json()["total"] == 0
+
+        control = anon_client.get(
+            "/api/v1/public/photos", params={"service_id": fx["s_ctl"]["id"]}
+        )
+        assert control.status_code == 200, control.text
+        assert {p["id"] for p in control.json()["items"]} == {
+            fx["ctl_direct"]["id"],
+            fx["ctl_via"]["id"],
+        }
+        assert control.json()["total"] == 2
+
+
 class TestPhotosBareGetClosed:
     """#493 сценарий 3: bare GET закрыты от анонима (staff-only, photos:read)."""
 

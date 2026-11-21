@@ -282,3 +282,66 @@ class TestLocationVisibilityExclusion:
         assert resp.status_code == 200, resp.text
         assert resp.json()["items"] == []
         assert resp.json()["total"] == 0
+
+
+# ─── GH #606: activities of hidden/archived services stay server-side ─────────
+
+
+@pytest.fixture
+def service_visibility_fixture(api_client, create_service, create_activity):
+    """Paired seeding for #606 spec §3.6: hidden + archived + visible
+    services, each with an in-window activity.
+
+    ``create_activity``'s default ``start`` (tomorrow) keeps every twin
+    inside the default public window; activities are seeded BEFORE the
+    archive flip (archiving is a plain ``is_active`` flip, but the
+    seeding order keeps the fixture robust to any create-time guard).
+    """
+    visible_svc = create_service(title="Visible Service Control")
+    hidden_svc = create_service(title="Hidden Service Twin", is_public=False)
+    archived_svc = create_service(title="Archived Service Twin")
+    twins = {
+        "visible": create_activity(service_id=visible_svc["id"]),
+        "hidden": create_activity(service_id=hidden_svc["id"]),
+        "archived": create_activity(service_id=archived_svc["id"]),
+    }
+    resp = api_client.post(f"/api/v1/services/{archived_svc['id']}/archive")
+    assert resp.status_code == 200, resp.text
+    return twins
+
+
+class TestServiceVisibilityExclusion:
+    """GH #606 spec §3.6: activities whose service is archived OR hidden
+    (``is_public = false``) are excluded server-side — the ``Service``
+    join terms beside the #601 location terms (mirror of
+    ``TestLocationVisibilityExclusion``; also fixes the pre-#606 leak of
+    archived-service activities in the vitrine)."""
+
+    def test_hidden_and_archived_service_activities_absent_visible_present(
+        self, anon_client, service_visibility_fixture
+    ) -> None:
+        """Парный посев + позитивный контроль: занятие видимой услуги в
+        выдаче, занятия скрытой и архивной услуг — нет."""
+        fx = service_visibility_fixture
+        resp = anon_client.get(URL)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        ids = [a["id"] for a in body["items"]]
+        # positive control: the visible-service activity IS here
+        assert fx["visible"]["id"] in ids, "visible control missing"
+        # the hidden-service twin is not (is_public=false)
+        assert fx["hidden"]["id"] not in ids, "hidden-service activity leaked"
+        # the archived-service twin is not (archived ≠ hidden — both excluded)
+        assert fx["archived"]["id"] not in ids, "archived-service activity leaked"
+        assert body["total"] == 1
+
+    def test_hidden_service_activity_id_via_narrowing_stays_invisible(
+        self, anon_client, service_visibility_fixture
+    ) -> None:
+        """Guard: ``?id=`` сужает, но не расширяет видимость — занятие
+        скрытой услуги через фильтр не достаётся (200 + пустой список)."""
+        fx = service_visibility_fixture
+        resp = anon_client.get(URL, params={"id": fx["hidden"]["id"]})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []
+        assert resp.json()["total"] == 0

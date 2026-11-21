@@ -1,7 +1,7 @@
 """Application settings loaded from environment variables."""
 
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 from pydantic import SecretStr, field_validator, model_validator
@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./memo.db"
-    ENV: str = "development"
+    # GH #616 §3.3 — closed set: an unknown value (a ``prod`` typo, a stray
+    # space) must refuse STARTUP, not silently skip every production guard
+    # that compares ENV == "production". Staging deploys set ENV=production.
+    ENV: Literal["development", "testing", "production"] = "development"
     PROJECT_NAME: str = "Memo Backend"
     CORS_ORIGINS: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
@@ -103,6 +106,12 @@ class Settings(BaseSettings):
     # for the future/past predicate and message text (spec §3.2).
     # Explicit zone, never the server TZ (panel finding).
     BUSINESS_TIMEZONE: str = "Europe/Moscow"
+    # GH #616 §3.4 — sqladmin mounts ONLY behind this explicit opt-in
+    # flag (deny-by-default). Retires the ``ENV != "testing"`` inversion
+    # where an unset variable silently ENABLED the admin console. The
+    # prod env contract (§3.3) never sets it — sqladmin is unavailable
+    # on prod; enabling anywhere is a separate decision.
+    SQLADMIN_ENABLED: bool = False
 
     @model_validator(mode="after")
     def _force_notification_off_in_testing(self) -> "Settings":

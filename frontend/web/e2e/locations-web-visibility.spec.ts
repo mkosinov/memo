@@ -13,9 +13,14 @@
  *        visit gets 401 → empty filter → the control assert fails.
  *
  *   US-3 «Бронь занятия скрытой площадки» (client session, the project's
- *        storageState default): a direct POST /api/v1/my/records with
- *        the hidden-location activity_id answers 404 BYTE-IDENTICAL to
- *        a missing id, and no record lands (cabinet + DB).
+ *        storageState default): a direct POST /api/v1/my/client/records
+ *        (#584 moved the booking branch off the flat /my/records this
+ *        spec originally probed — and the generic 404 handler renders a
+ *        route-miss with the SAME ACTIVITY_NOT_FOUND body, so the old
+ *        address kept passing vacuously; #606 Task 8 repointed the probe
+ *        at the live route) with the hidden-location activity_id answers
+ *        404 BYTE-IDENTICAL to a missing id, and no record lands
+ *        (cabinet + DB).
  *
  *   US-4 «Возврат площадки» (фаза админ-цикла Task 4): after «Видно
  *        клиентам» is switched back ON the location and its activity
@@ -92,9 +97,10 @@ test.describe('#601 US-3 — бронь занятия скрытой площа
     try {
       // The direct POST goes to the SAME origin the page uses, carrying
       // the client session cookie (page.request shares the context) and
-      // the web Origin — exactly the browser wire (#600 donor).
+      // the web Origin — exactly the browser wire (#600 donor). Route:
+      // the post-#584 booking branch (see the US-3 note above).
       const post = (activityId: string) =>
-        page.request.post(`${BACKEND}/api/v1/my/records`, {
+        page.request.post(`${BACKEND}/api/v1/my/client/records`, {
           data: {
             activity_id: activityId,
             phone: '+79001234567',

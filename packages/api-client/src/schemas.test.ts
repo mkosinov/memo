@@ -1198,6 +1198,7 @@ const validService = {
   tariffs: [validTariff],
   tags: [validTag],
   materials: [validServiceMaterialItem],
+  is_public: true, // GH #606: web-visibility flag (true = shown on the site)
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -1285,6 +1286,18 @@ describe('ServiceResponseSchema', () => {
 
   it('rejects an unknown audience value (422 contract)', () => {
     const data = { ...validService, tariffs: [{ ...validTariff, audience: 'senior' }] };
+    expect(() => ServiceResponseSchema.parse(data)).toThrow();
+  });
+
+  // ─── GH #606: web-visibility flag (mirror of the #601 location tests) ───
+
+  it('parses service with is_public false (hidden from the site, GH #606)', () => {
+    const result = ServiceResponseSchema.parse({ ...validService, is_public: false });
+    expect(result.is_public).toBe(false);
+  });
+
+  it('rejects non-boolean is_public (GH #606)', () => {
+    const data = { ...validService, is_public: 'yes' };
     expect(() => ServiceResponseSchema.parse(data)).toThrow();
   });
 });
@@ -2144,6 +2157,7 @@ describe('Type exports', () => {
       max_age: 18,
       duration: 60,
       record_info: '',
+      is_public: true,
       tariffs: [],
       tag_ids: [],
       materials: [],
@@ -2335,6 +2349,18 @@ describe('ServiceCreateSchema', () => {
     const data = { ...validServiceCreate, materials: [{ note: 'без id' }] };
     expect(() => ServiceCreateSchema.parse(data)).toThrow();
   });
+
+  // ─── GH #606: web visibility (mirror of the #601 location defaults) ───
+
+  it('defaults is_public to true when absent (GH #606: default = visible)', () => {
+    const result = ServiceCreateSchema.parse(validServiceCreate);
+    expect(result.is_public).toBe(true);
+  });
+
+  it('accepts is_public false (GH #606: hidden from the web)', () => {
+    const result = ServiceCreateSchema.parse({ ...validServiceCreate, is_public: false });
+    expect(result.is_public).toBe(false);
+  });
 });
 
 // ─── ServiceUpdateSchema ─────────────────────────────────────────────────
@@ -2372,6 +2398,17 @@ describe('ServiceUpdateSchema', () => {
         bogus: true,
       }),
     ).toThrow();
+  });
+
+  // GH #606 §3.6: the modal's canonical PUT carries the current flag value —
+  // is_public must be part of the full update contract (extra="forbid" parity).
+  it('accepts is_public in the full update payload (GH #606)', () => {
+    const result = ServiceUpdateSchema.parse({
+      title: 'Новое название',
+      duration: 90,
+      is_public: false,
+    });
+    expect(result.is_public).toBe(false);
   });
 });
 

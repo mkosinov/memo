@@ -19,10 +19,14 @@ from src.schemas.activity import (
 )
 from src.schemas.common import PaginatedResponse
 from src.schemas.location import LocationPublicResponse
+from src.schemas.master import MasterPublicResponse
 from src.schemas.photo import PhotoPublicResponse, PublicPhotoListParams
+from src.schemas.service import ServicePublicResponse
 from src.services.activity import list_public_activities_view
 from src.services.location import list_public_locations_view
+from src.services.master import list_public_masters_view
 from src.services.photo import list_public_photos_view
+from src.services.service import list_public_services_view
 
 router = APIRouter(tags=["public"])
 
@@ -77,5 +81,47 @@ async def list_public_locations(
     id``; capped by ``BARE_LIST_MAX_ROWS`` like every bare list."""
     try:
         return await list_public_locations_view(session)
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/masters", response_model=list[MasterPublicResponse])
+async def list_public_masters(
+    session: SessionDep,
+) -> list[MasterPublicResponse]:
+    """Public masters dictionary (GH #606, ADR-015): a bare JSON array —
+    no parameters at all (the ``/all`` canon, spec §3.1). Forced
+    server-side visibility: only ACTING masters — the exact
+    ``masters.is_active`` filter of the staff list (a master has no
+    ``is_public`` flag; an archived master never reaches the
+    showcase). Minimal 5-field ``MasterPublicResponse`` schema («имя,
+    специальность, фото»); pinned order ``sort_order, first_name, id``
+    (the staff-list order); capped by ``BARE_LIST_MAX_ROWS`` like
+    every bare list."""
+    try:
+        return await list_public_masters_view(session)
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/services", response_model=list[ServicePublicResponse])
+async def list_public_services(
+    session: SessionDep,
+) -> list[ServicePublicResponse]:
+    """Public services dictionary (GH #606, ADR-015): a bare JSON array —
+    no parameters at all (the ``/all`` canon, spec §3.2). Forced
+    server-side visibility: only rows that are BOTH active and shown
+    on the site (``is_active`` AND ``is_public`` — the #601 visibility
+    mirror, spec §3.6); an archived or hidden service never reaches
+    the showcase (inside the admin a hidden service stays fully
+    working). Minimal 10-field ``ServicePublicResponse`` schema (form
+    + transport details + ``specialty``); nested rows eagerly loaded
+    (``selectinload`` — the staff-list precedent), materials ordered
+    ``title ASC, id ASC`` (the staff-contract order), tags as
+    server-sorted title strings (#493 precedent); pinned order
+    ``title, id``; capped by ``BARE_LIST_MAX_ROWS`` like every bare
+    list."""
+    try:
+        return await list_public_services_view(session)
     except BareListLimitExceededError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

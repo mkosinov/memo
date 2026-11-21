@@ -182,6 +182,20 @@ export const MasterViewResponseSchema = z.object({
 });
 export type MasterViewResponse = z.infer<typeof MasterViewResponseSchema>;
 
+/** #606: public masters dictionary item — minimal audience schema (ADR-015,
+ * naming per LocationPublicResponseSchema): exactly the 5 showcase fields
+ * (name, specialty, photo); archived rows are excluded server-side,
+ * staff-only fields (color, sort_order, archived, timestamps) never leave
+ * through this schema. */
+export const MasterPublicResponseSchema = z.object({
+  id: z.string(),
+  first_name: z.string(),
+  last_name: z.string(),
+  specialty: z.string(),
+  avatar_url: z.string().nullable(),
+});
+export type MasterPublicResponse = z.infer<typeof MasterPublicResponseSchema>;
+
 // ─── PositionResponse (GH #266 D4 — positions dictionary) ───────────────────
 // Built-ins carry fixed string ids (master/admin, is_system=true — title
 // editable, deletion forbidden server-side); user-defined get uuid ids.
@@ -365,12 +379,60 @@ export const ServiceResponseSchema = z.object({
   tariffs: z.array(TariffResponseSchema),
   tags: z.array(TagResponseSchema),
   materials: z.array(ServiceMaterialItemSchema).default([]),
+  // GH #606: web-visibility flag — true = shown on the client site, false =
+  // hidden from the site only (fully working in admin). NOT NULL column,
+  // always serialized. Distinct from `archived`.
+  is_public: z.boolean(),
   archived: z.boolean(), // inverted: archived = true means the service is in the archive (#207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
 
 export type ServiceResponse = z.infer<typeof ServiceResponseSchema>;
+
+/** #606: nested tariff of ServicePublicResponse — the showcase trio (the
+ * price range / the tariff choice at booking); staff-only fields
+ * (description, audience, service_id) never leave through the anonymous
+ * dictionary. */
+export const ServicePublicTariffSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  price: z.number(),
+});
+export type ServicePublicTariff = z.infer<typeof ServicePublicTariffSchema>;
+
+/** #606: nested material of ServicePublicResponse — the «what to bring»
+ * list; the link `note` travels with the material's `description` (the
+ * `note ?? description` fallback, #223); the staff-contract `id` is
+ * dropped — the web never keys materials. */
+export const ServicePublicMaterialSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  note: z.string().nullable(),
+});
+export type ServicePublicMaterial = z.infer<typeof ServicePublicMaterialSchema>;
+
+/** #606: public services dictionary item — minimal audience schema (ADR-015):
+ * exactly the 10 showcase fields — the web-form fields (title, description,
+ * image_url, specialty, ages) plus the nested transport (tariffs, materials,
+ * tags). `max_age` is the only nullable scalar (null = no upper age limit);
+ * tags are plain title strings (the PhotoPublicResponse #493 precedent).
+ * Staff-only fields (duration, record_info, archived, is_public, timestamps)
+ * never leave through this schema; archived and hidden rows are excluded
+ * server-side. */
+export const ServicePublicResponseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  image_url: z.string(),
+  specialty: z.string(),
+  min_age: z.number(),
+  max_age: z.number().nullable(),
+  tariffs: z.array(ServicePublicTariffSchema).default([]),
+  materials: z.array(ServicePublicMaterialSchema).default([]),
+  tags: z.array(z.string()).default([]),
+});
+export type ServicePublicResponse = z.infer<typeof ServicePublicResponseSchema>;
 
 // ─── ActivityCreate (request body — no id, created_at, updated_at, occupied) ─
 // Fields with backend defaults use .optional() — the backend handles default logic.
@@ -732,6 +794,10 @@ export const ServiceCreateSchema = z.object({
   tariffs: z.array(TariffCreateSchema).default([]),
   tag_ids: z.array(z.string()).default([]),
   materials: z.array(ServiceMaterialLinkSchema).default([]),
+  // GH #606: web visibility — absent → true (visible). Mirrors backend
+  // ServiceBase default; Update (.strict() below) carries the full PUT
+  // contract, patchService uses Partial<ServiceUpdate>.
+  is_public: z.boolean().optional().default(true),
 });
 
 export type ServiceCreate = z.infer<typeof ServiceCreateSchema>;
@@ -1337,6 +1403,14 @@ export type PhotoPublicListResponse = z.infer<typeof PhotoPublicListResponseSche
 // #601: public location dictionary — BARE array (no envelope, no params).
 export const LocationPublicListResponseSchema = z.array(LocationPublicResponseSchema);
 export type LocationPublicListResponse = z.infer<typeof LocationPublicListResponseSchema>;
+
+// #606: public masters dictionary — BARE array (no envelope, no params).
+export const MasterPublicListResponseSchema = z.array(MasterPublicResponseSchema);
+export type MasterPublicListResponse = z.infer<typeof MasterPublicListResponseSchema>;
+
+// #606: public services dictionary — BARE array (no envelope, no params).
+export const ServicePublicListResponseSchema = z.array(ServicePublicResponseSchema);
+export type ServicePublicListResponse = z.infer<typeof ServicePublicListResponseSchema>;
 
 // GH #513 — the three client-cabinet /my lists (same {items, total, page,
 // per_page} envelope; per-endpoint item shapes above).

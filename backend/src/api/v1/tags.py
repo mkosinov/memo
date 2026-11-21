@@ -1,4 +1,12 @@
-"""FastAPI router for tag CRUD endpoints."""
+"""FastAPI router for tag CRUD endpoints.
+
+GH #606 Task 3.2: the bare list/point-get GETs are staff-only
+(``tags:read``) — both left ``PUBLIC_ROUTES`` (#601 locations / #600
+activities / #493 photos / Task 3.1 masters+services precedents); tags
+carry NO showcase of their own — the anonymous services showcase at
+``GET /api/v1/public/services`` carries tag titles as sorted strings
+(ADR-015 audience namespace, spec §3.3).
+"""
 
 from functools import lru_cache
 from typing import Annotated
@@ -47,6 +55,11 @@ _WRITE_GUARD = [
     Depends(require_permission("tags:write")),
     Depends(verify_fetch_metadata),
 ]
+# GH #606 Task 3.2 (#601 locations / #600 activities / #493 photos /
+# Task 3.1 masters+services precedents): the bare list/point-get GETs
+# are staff-only (tags:read) — tags carry NO /public showcase of their
+# own; the anonymous services showcase carries tag titles as sorted
+# strings (spec §3.3). /all already carried the guard.
 _READ_GUARD = [Depends(require_permission("tags:read"))]
 
 # Sort whitelist map: UI key → spec (#205 Task 3, spec §4.5; GH #367
@@ -58,7 +71,11 @@ _TAG_SORT_KEYS: SortKeyMap = {
 }
 
 
-@router.get("", response_model=PaginatedResponse[TagResponse])
+@router.get(
+    "",
+    response_model=PaginatedResponse[TagResponse],
+    dependencies=_READ_GUARD,
+)
 async def list_tags(
     service: _ServiceDep,
     session: SessionDep,
@@ -82,6 +99,10 @@ async def list_tags(
     ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
     given UUID set — conjunctive with every other filter, ≤100 distinct
     after dedup, garbage → 422.
+
+    The list is STAFF-ONLY since #606 Task 3.2 (tags:read guard above)
+    — tags carry NO anonymous showcase of their own; the public
+    services showcase carries tag titles as sorted strings (spec §3.3).
     """
     # Annotated for the SortExpr union: the mixed asc() fallback joins to
     # ``list[object]`` otherwise, and ``GenericService.list`` takes
@@ -123,13 +144,22 @@ async def list_all_tags(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/{tag_id}", response_model=TagResponse)
+@router.get(
+    "/{tag_id}",
+    response_model=TagResponse,
+    dependencies=_READ_GUARD,
+)
 async def get_tag(
     tag_id: str,
     service: _ServiceDep,
     session: SessionDep,
 ) -> TagResponse:
-    """Return a single tag by ID."""
+    """Return a single tag by ID.
+
+    STAFF-ONLY since #606 Task 3.2 (tags:read guard above) — tags
+    carry NO anonymous point-get showcase; the public services
+    showcase carries tag titles as sorted strings (spec §3.3).
+    """
     tag = await service.get(db_session=session, id=tag_id)
     if not tag:
         raise HTTPException(

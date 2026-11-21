@@ -36,9 +36,21 @@ export const serviceColumns = (): ColumnDef<ServiceResponse>[] => [
     key: 'title',
     label: 'Название',
     defaultVisible: true,
+    // GH #606 (mirror of #601 locationColumns): hidden-from-web services
+    // («Видно клиентам» off) get the «Не в web» pill next to the title —
+    // muted pair from the «Архив» badge cell below; distinct from archive
+    // (hidden ≠ archived).
     render: (s) => (
-      <span className="font-medium" style={{ color: 'var(--ink)' }}>
+      <span className="font-medium inline-flex items-center gap-1.5" style={{ color: 'var(--ink)' }}>
         {s.title}
+        {!s.is_public && (
+          <span
+            data-testid="service-web-hidden-badge"
+            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 whitespace-nowrap"
+          >
+            Не в web
+          </span>
+        )}
       </span>
     ),
   },

@@ -113,6 +113,7 @@ const ACTIVE_SERVICE: ServiceResponse = {
   tariffs: [],
   tags: [],
   materials: [],
+  is_public: true,
   archived: false,
   created_at: '2026-01-01T00:00:00',
   updated_at: '2026-01-01T00:00:00',

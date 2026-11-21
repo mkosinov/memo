@@ -81,7 +81,6 @@ import {
   type PasswordSetupValidateResponse,
   StaffListResponseSchema,
   PositionListResponseSchema,
-  MasterViewListResponseSchema,
   LocationListResponseSchema,
   TagListResponseSchema,
   MaterialListResponseSchema,
@@ -92,6 +91,10 @@ import {
   LocationAllResponseSchema,
   LocationPublicListResponseSchema,
   type LocationPublicListResponse,
+  MasterPublicListResponseSchema,
+  type MasterPublicListResponse,
+  ServicePublicListResponseSchema,
+  type ServicePublicListResponse,
   ServiceAllResponseSchema,
   TagAllResponseSchema,
   MaterialAllResponseSchema,
@@ -213,13 +216,15 @@ function resolveDeleteBody(
 }
 
 // ─── Masters (read-only view, GH #266 D8) ─────────────────────────────────
-// /api/v1/masters serves the ACTING masters (masters.is_active = true) for
-// schedule filters and the client site #48. No mutations, no GET /{id}, no
-// reorder — writes live on the staff card. Undeclared query params (status/
-// sort/q) are ignored server-side; ListParams keeps the shared listQuery shape.
+// The paginated /api/v1/masters getter left the client in #606: admin reads
+// /masters/all (getAllMasters), the client site uses the public dictionary
+// below. The backend route itself stays — staff-guarded (#606 §3.3).
 
-export async function getMasters(params?: ListParams): Promise<PaginatedResponse<MasterViewResponse>> {
-  return api(`/api/v1/masters${listQuery(params)}`, MasterViewListResponseSchema);
+/** #606 / ADR-015: anonymous masters dictionary for the client site —
+ * bare array of 5-field rows, no parameters; archived rows are excluded
+ * server-side. */
+export async function getPublicMasters(): Promise<MasterPublicListResponse> {
+  return api('/api/v1/public/masters', MasterPublicListResponseSchema);
 }
 
 // ─── Staff (GH #266 — the full staff directory) ───────────────────────────
@@ -491,6 +496,13 @@ export async function resolveDeletePhoto(id: string, payload: ResolveDeletePhoto
 
 export async function getServices(params?: ListParams): Promise<PaginatedResponse<ServiceResponse>> {
   return api(`/api/v1/services${listQuery(params)}`, ServiceListResponseSchema);
+}
+
+/** #606 / ADR-015: anonymous services dictionary for the client site —
+ * bare array, no parameters; archived and hidden (is_public=false) rows
+ * are excluded server-side. */
+export async function getPublicServices(): Promise<ServicePublicListResponse> {
+  return api('/api/v1/public/services', ServicePublicListResponseSchema);
 }
 
 // ─── Activities ────────────────────────────────────────────────────────────

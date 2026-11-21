@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-11-21
+
+### Added
+- **GH #606 — Волна ADR-015 (словари): витринные справочники
+  `/public/masters` + `/public/services`, гарды 5 bare GET словарей,
+  флаг видимости услуг `is_public`, миграция веб-формы записи** —
+  branch `606-adr015-dictionaries` (8 задач, 15 коммитов
+  `94a28a9f..8a9aa085`, base `923ad95e` = main; 67 файлов, +3265/−217;
+  спека `docs/specs/2026-11-13-adr015-dictionaries-606-design.md`
+  рев.4, план `docs/plans/2026-11-14-adr015-dictionaries-606-plan.md`
+  8/8 — оба на main, unchanged by IMPL):
+  - **Флаг `is_public` услуги (T1 `94a28a9f`+`d3426753`):** зеркало
+    #601 для локаций — миграция `d4f6a8b0c2e1`
+    (`services.is_public` NOT NULL DEFAULT true), модель, staff-контракт
+    (`ServiceBase.is_public` — наследуется Create/Update/Response;
+    `ServicePatch.is_public: bool | None` отдельной строкой, канон
+    записи #601), аудит услуг, NOT_NULL_FIELDS, сид-полярности
+    в `seed-data/services.yaml`.
+  - **Витринные справочники (T2 `42062198`+`c07e82ca`):**
+    `GET /api/v1/public/masters` — только действующие мастера
+    (`is_active`), минимальная 5-поле схема `MasterPublicResponse`;
+    `GET /api/v1/public/services` — только активные с `is_public = true`,
+    схема `ServicePublicResponse`: поля формы записи + поля деталей
+    (`description`, `min_age`, `max_age` — единственный nullable
+    скаляр) + `specialty`, вложенные тарифы/материалы, теги как
+    отсортированные строки-заголовки; поля деталей едут «транспортом»
+    под будущий экран деталей услуги — показ в текущем UI не строится
+    (решение владельца, вариант 2); обе записи в allowlist
+    `PUBLIC_ROUTES`.
+  - **Гарды bare GET (T3 `c5243d99`+`9b6e235a`, фикс `4699a2f8`):**
+    `GET /masters` → `masters:read`, `GET /services[/id]` →
+    `services:read`, `GET /tags[/id]` → `tags:read` — аноним и
+    клиентская сессия → 401; 5 записей вычищены из `PUBLIC_ROUTES`
+    (последний анонимный bare словарь — теги — закрыт; собственной
+    витрины у тегов нет — заголовки едут вложенными в витрину услуг);
+    витринные маршруты внесены в `_PUBLIC_GETS` scope-контракта +
+    зеркала докстрингов (`4699a2f8`).
+  - **Предикаты видимости (T4 `cfa3ddca`+`a321686a`):** публичная
+    витрина занятий #600 и фотогалерея (#493 витрина) исключают услуги
+    скрытые (`is_public = false`) или архивные; бронь по прямому id
+    скрытой услуги → 404 байт-в-байт паритет несуществующему
+    (предикат в пробе существования ДО валидации тарифа — без бокового
+    канала); админка не тронута — видит всё.
+  - **api-client (T5 `9ed1c0dd`+`47108ee6`):** `getPublicMasters` /
+    `getPublicServices` + zod-схемы по прецеденту #600/#601; легаси
+    `getMasters` удалён — admin-потребители переехали на
+    `getAllMasters`.
+  - **Web (T6 `29e47b26`):** форма записи (`useSchedule` /
+    `buildSchedule`) переведена на публичные словари — все 4
+    справочника формы (занятия, локации, мастера, услуги) теперь с
+    витринных маршрутов; staff-словари из web не читаются.
+  - **Админ (T7 `ffd1c3a9`):** switch «Видно клиентам» в модалке услуги
+    + бейдж «Не в web» в таблице /services (зеркало #601).
+  - **E2E (T8 `da4f8336`+`8a9aa085`):** admin
+    `services-web-hidden.spec.ts` (3/3) + web
+    `services-web-visibility.spec.ts` (3/3) + анонимная регресс-сеть
+    (14/14 — словари/витрины под анонимом).
+  - Tests: backend per-task сьюты — T1 **21/21** (+**135/135**
+    регрессия), T2 **115/115**, T3 **117/117**, T4 **152/152**;
+    api-client vitest **611/611**; admin vitest **3204/3204**
+    (+typecheck/lint чистые); web vitest **572/572** (+typecheck
+    чистый); полный CI — гейт PR (manager-owned). Visual gate —
+    **EXIT 0** (бейдж «Не в web» на /services desktop; модалка —
+    MANUAL_REVIEW по спеке §7, автоматизация в admin-e2e). Приёмка —
+    все 10 сценариев спеки §4 покрыты (юнит/API/e2e); behavioral
+    delta §5 реализована. DoD-заметки: #599 не смержен — адаптация
+    `specialty` у IMPL (спека §3.5, plain string + комментарий);
+    #584-пересечение закрыто на новом base (пин-тесты `_PUBLIC_GETS`).
+  - Status: `docs/status/2026-11-21-adr015-dictionaries-606.md`
+
 ## [Unreleased] — 2026-11-14
 
 ### Added

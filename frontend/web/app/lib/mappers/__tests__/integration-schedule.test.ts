@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildWebSchedule } from '../buildSchedule';
 import { toScheduleView } from '../to-schedule-vm';
-import type { ServiceResponse } from '@memo/api-client';
+import type { ServicePublicResponse } from '@memo/api-client';
 
 // Mock data matching the real API response shapes
 const mockMaster = {
@@ -18,7 +18,9 @@ const mockMaster = {
   updated_at: '',
 };
 
-const mockService: ServiceResponse = {
+// #606: the services map carries PUBLIC dictionary rows — exactly the 10
+// showcase fields; tags are plain strings (spec §3.4).
+const mockService: ServicePublicResponse = {
   id: 's1',
   title: 'Картина маслом',
   description: 'Масляная живопись',
@@ -26,19 +28,14 @@ const mockService: ServiceResponse = {
   specialty: 'живопись',
   min_age: 12,
   max_age: 99,
-  duration: 150,
-  record_info: '',
-  archived: false,
-  created_at: '',
-  updated_at: '',
   materials: [
-    { id: 'mat3', title: 'Акварель', description: 'Акварельные краски — прозрачные, нежные', note: null },
-    { id: 'mat1', title: 'Масло', description: 'Масляные краски — классика живописи', note: 'Густые краски, холст 40×50' },
+    { title: 'Акварель', description: 'Акварельные краски — прозрачные, нежные', note: null },
+    { title: 'Масло', description: 'Масляные краски — классика живописи', note: 'Густые краски, холст 40×50' },
   ],
   tariffs: [
-    { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
+    { id: 't1', title: 'Взрослый', price: 3500 },
   ],
-  tags: [{ id: 'tag2', title: 'хит' }],
+  tags: ['хит'],
 };
 
 const mockLocation = {

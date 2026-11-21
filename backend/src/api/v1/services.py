@@ -1,4 +1,12 @@
-"""FastAPI router for service CRUD endpoints."""
+"""FastAPI router for service CRUD endpoints.
+
+GH #606 Task 3: the bare list/point-get GETs are staff-only
+(``services:read``) — both left ``PUBLIC_ROUTES`` (#601 locations /
+#600 activities / #493 photos precedents); the anonymous showcase is
+``GET /api/v1/public/services`` (ADR-015 audience namespace, the
+vitrine carrying tag titles as sorted strings). ``/all`` already
+carried the guard.
+"""
 
 from functools import lru_cache
 from typing import Annotated
@@ -49,6 +57,10 @@ _WRITE_GUARD = [
     Depends(require_permission("services:write")),
     Depends(verify_fetch_metadata),
 ]
+# GH #606 Task 3 (#601 locations / #600 activities / #493 photos
+# precedents): the bare list/point-get GETs are staff-only
+# (services:read) — the anonymous dictionary lives at
+# GET /api/v1/public/services (ADR-015). /all already carried the guard.
 _READ_GUARD = [Depends(require_permission("services:read"))]
 
 # Sort whitelist map: UI key → spec (#205 Task 3, spec §4.5; GH #367
@@ -74,7 +86,11 @@ _SERVICE_SORT_KEYS: SortKeyMap = {
 }
 
 
-@router.get("", response_model=PaginatedResponse[ServiceResponse])
+@router.get(
+    "",
+    response_model=PaginatedResponse[ServiceResponse],
+    dependencies=_READ_GUARD,
+)
 async def list_services(
     service: _ServiceDep,
     session: SessionDep,
@@ -108,6 +124,10 @@ async def list_services(
     material via ``service_materials``. Invalid UUID → 422 (param type
     validation); valid-but-unknown → 200 with an empty page (filter
     semantics — the same shape as a ``q`` no-match).
+
+    The list is STAFF-ONLY since #606 Task 3 (services:read guard
+    above) — the anonymous dictionary lives at
+    /api/v1/public/services (ADR-015).
     """
     # Annotated for the SortExpr union: the mixed asc() fallback joins to
     # ``list[object]`` otherwise, and ``ServiceService.list`` takes
@@ -160,13 +180,22 @@ async def list_all_services(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/{service_id}", response_model=ServiceResponse)
+@router.get(
+    "/{service_id}",
+    response_model=ServiceResponse,
+    dependencies=_READ_GUARD,
+)
 async def get_service(
     service_id: str,
     service: _ServiceDep,
     session: SessionDep,
 ) -> ServiceResponse:
-    """Return a single service by ID with tariffs and tags."""
+    """Return a single service by ID with tariffs and tags.
+
+    STAFF-ONLY since #606 Task 3 (services:read guard above) — the
+    anonymous showcase carries no point-get; the dictionary lives at
+    /api/v1/public/services (ADR-015).
+    """
     svc = await service.get(db_session=session, id=service_id)
     if not svc:
         raise HTTPException(

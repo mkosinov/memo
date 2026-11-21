@@ -349,7 +349,7 @@ test.describe('S3 — edit name + portrait, specialty read-only', () => {
 // S4 — Private part of «Мои данные» (spec §7.4)
 // ===========================================================================
 test.describe('S4 — private fields persist; /my 401; /masters leaks nothing private', () => {
-  test('private fields persist across reopen; anonymous /my 401; public /masters key set has no private keys', async ({ page, request }) => {
+  test('private fields persist across reopen; anonymous /my 401; bare /masters 401; /public/masters exposes only showcase fields', async ({ page, request }) => {
     const phone = uniquePhone();
     const staff = await createTestStaff(request, {
       first_name: 'Приватный',
@@ -420,21 +420,24 @@ test.describe('S4 — private fields persist; /my 401; /masters leaks nothing pr
       expect(anonMy.status()).toBe(401);
       expect((await anonMy.json())?.detail?.code).toBe('AUTH_UNAUTHORIZED');
 
-      // ── Public GET /api/v1/masters key set contains NO private field keys ──
-      const mastersResp = await anon.get('/api/v1/masters');
-      expect(mastersResp.ok()).toBeTruthy();
-      const mastersJson = await mastersResp.json();
-      const mastersList: any[] = mastersJson.items || mastersJson;
+      // ── Bare GET /api/v1/masters is guarded (#606, spec §3.3): an anonymous
+      //    caller gets 401 — the public surface moved to the showcase route.
+      const bareMasters = await anon.get('/api/v1/masters');
+      expect(bareMasters.status()).toBe(401);
+
+      // ── Showcase GET /api/v1/public/masters (#606, spec §3.1): bare array
+      //    (NOT .items), non-empty, and every item's key set is a subset of
+      //    the 5 showcase fields — private profile keys can never leak.
+      const publicMasters = await anon.get('/api/v1/public/masters');
+      expect(publicMasters.ok()).toBeTruthy();
+      const mastersList: any[] = await publicMasters.json();
+      expect(Array.isArray(mastersList), 'public /masters must be a bare array').toBeTruthy();
       expect(mastersList.length).toBeGreaterThan(0);
-      const PRIVATE_KEYS = [
-        'patronymic', 'birth_date', 'residence_address', 'birth_place',
-        'passport_series_number', 'passport_issued_date', 'passport_issued_by',
-        'registration_address', 'role',
-      ];
+      const SHOWCASE_KEYS = ['id', 'first_name', 'last_name', 'specialty', 'avatar_url'];
       for (const m of mastersList) {
         const keys = Object.keys(m);
-        for (const pk of PRIVATE_KEYS) {
-          expect(keys, `public /masters must not expose "${pk}"`).not.toContain(pk);
+        for (const k of keys) {
+          expect(SHOWCASE_KEYS, `public /masters item key "${k}" is outside the showcase contract`).toContain(k);
         }
       }
     } finally {

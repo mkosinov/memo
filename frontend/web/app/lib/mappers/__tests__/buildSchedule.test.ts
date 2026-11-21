@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildWebSchedule, type WebScheduleDTO } from '../buildSchedule';
-import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationPublicResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse, MasterPublicResponse, LocationPublicResponse } from '@memo/api-client';
 
 function makeActivity(overrides?: Partial<ActivityResponse>): ActivityResponse {
   return {
@@ -45,20 +45,18 @@ function makeService(overrides?: Partial<ServiceResponse>): ServiceResponse {
   } as ServiceResponse;
 }
 
-function makeMaster(overrides?: Partial<MasterViewResponse>): MasterViewResponse {
+// #606: the masters map carries PUBLIC dictionary rows — exactly the 5
+// showcase fields (name, specialty, photo); the builder reads only
+// first/last name and avatar_url.
+function makeMaster(overrides?: Partial<MasterPublicResponse>): MasterPublicResponse {
   return {
     id: 'master-1',
     first_name: 'Ольга',
     last_name: 'Середа',
-    color: '#C49A2E',
-    position: 'Художник',
     specialty: 'painting',
     avatar_url: 'https://example.com/avatar.jpg',
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
     ...overrides,
-  } as MasterViewResponse;
+  };
 }
 
 // #601: the location map carries PUBLIC dictionary rows — exactly the 4
@@ -247,7 +245,7 @@ describe('buildWebSchedule', () => {
   it('skips activity when master is missing', () => {
     const activities = [makeActivity()];
     const services = new Map([['service-1', makeService()]]);
-    const masters = new Map<string, MasterViewResponse>();
+    const masters = new Map<string, MasterPublicResponse>();
     const locations = new Map([['loc-1', makeLocation()]]);
 
     const result = buildWebSchedule(activities, services, masters, locations);

@@ -13,7 +13,9 @@ vi.mock('@memo/api-client', () => ({
   getLocations: vi.fn(),
   getPublicActivities: vi.fn(),
   getServices: vi.fn(),
-  getMasters: vi.fn(),
+  // #606: masters come from the PUBLIC dictionary (bare array); the paginated
+  // /masters getter is gone from the api-client.
+  getPublicMasters: vi.fn(),
 }));
 
 import {
@@ -21,14 +23,14 @@ import {
   getLocations,
   getPublicActivities,
   getServices,
-  getMasters,
+  getPublicMasters,
 } from '@memo/api-client';
 
 const mockedGetPublicLocations = getPublicLocations as Mock;
 const mockedGetLocations = getLocations as Mock;
 const mockedGetPublicActivities = getPublicActivities as Mock;
 const mockedGetServices = getServices as Mock;
-const mockedGetMasters = getMasters as Mock;
+const mockedGetPublicMasters = getPublicMasters as Mock;
 
 // #601: public dictionary rows — bare 4-field objects, no envelope.
 const mockLocationRows = [
@@ -129,7 +131,8 @@ describe('useLocations', () => {
   it('dedupes with useSchedule — same key, single public dictionary request', async () => {
     mockedGetPublicActivities.mockResolvedValue({ items: [], total: 0 });
     mockedGetServices.mockResolvedValue({ items: [], total: 0 });
-    mockedGetMasters.mockResolvedValue({ items: [], total: 0 });
+    // #606: bare array — the public masters dictionary has no envelope.
+    mockedGetPublicMasters.mockResolvedValue([]);
 
     const wrapper = createWrapper();
     const schedule = renderHook(() => useSchedule(), { wrapper });

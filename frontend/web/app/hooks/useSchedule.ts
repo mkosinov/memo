@@ -2,13 +2,13 @@
 
 import { useMemo, useCallback } from 'react';
 import { useQueries } from '@tanstack/react-query';
-import { getPublicActivities, getMasters, getServices, getPublicLocations } from '@memo/api-client';
+import { getPublicActivities, getPublicMasters, getServices, getPublicLocations } from '@memo/api-client';
 import type { PaginatedResponse } from '@memo/api-client';
 import type { ScheduleIndex } from '@memo/domain';
 import { buildWebSchedule, type WebScheduleDTO } from '@/app/lib/mappers/buildSchedule';
 import { toScheduleView } from '@/app/lib/mappers/to-schedule-vm';
 import type { ScheduleView, ScheduleFiltersView } from '@/app/lib/model/view/schedule';
-import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationPublicResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse, MasterPublicResponse, LocationPublicResponse } from '@memo/api-client';
 
 export interface UseScheduleResult {
   schedules: ScheduleView[];
@@ -45,8 +45,10 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
         gcTime: 600_000,
       },
       {
+        // #606: anonymous public masters dictionary (bare array) — the
+        // staff-guarded paginated /masters getter is gone from the client.
         queryKey: ['masters'],
-        queryFn: () => getMasters(),
+        queryFn: () => getPublicMasters(),
         staleTime: 300_000,
         gcTime: 600_000,
       },
@@ -65,11 +67,12 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
   const index: ScheduleIndex<WebScheduleDTO> | null = useMemo(() => {
     if (queries.some((q) => q.isLoading || q.isError)) return null;
     const rawData = queries.map((q) => q.data);
-    // List endpoints return the paginated envelope ({items, total}) — consume .items;
-    // #601: the public location dictionary is a BARE array (no envelope).
+    // Activities/services list endpoints return the paginated envelope
+    // ({items, total}) — consume .items; #601/#606: the public location and
+    // masters dictionaries are BARE arrays (no envelope).
     const activities = (rawData[0] as PaginatedResponse<ActivityResponse> | undefined)?.items ?? [];
     const services = (rawData[1] as PaginatedResponse<ServiceResponse> | undefined)?.items ?? [];
-    const masters = (rawData[2] as PaginatedResponse<MasterViewResponse> | undefined)?.items ?? [];
+    const masters = (rawData[2] as MasterPublicResponse[] | undefined) ?? [];
     const locations = (rawData[3] as LocationPublicResponse[] | undefined) ?? [];
     return buildWebSchedule(
       activities,

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getPublicMasters, getPublicServices, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
+import { getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getPublicMasters, getPublicServices, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, ActivityPublicListResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, LocationPublicListResponseSchema, MasterPublicListResponseSchema, ServicePublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
@@ -27,20 +27,6 @@ beforeEach(() => {
 });
 
 // ─── Masters (read-only view, GH #266 D8) ──────────────────────────────────
-
-describe('getMasters', () => {
-  it('calls /api/v1/masters without params', async () => {
-    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters();
-    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
-  });
-
-  it('calls /api/v1/masters with pagination params', async () => {
-    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
-    await getMasters({ per_page: 100 });
-    expect(api).toHaveBeenCalledWith('/api/v1/masters?per_page=100', expect.anything());
-  });
-});
 
 describe('getPublicMasters (#606: /api/v1/public/masters)', () => {
   it('calls the anonymous dictionary bare — no params, bare-array schema', async () => {
@@ -2734,32 +2720,32 @@ describe('resolveDeletePosition', () => {
 describe('listQuery status param', () => {
   it('serializes status=archived into the URL', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters({ status: 'archived' });
-    expect(api).toHaveBeenCalledWith('/api/v1/masters?status=archived', expect.anything());
+    await getLocations({ status: 'archived' });
+    expect(api).toHaveBeenCalledWith('/api/v1/locations?status=archived', expect.anything());
   });
 
   it('serializes status=all into the URL', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters({ status: 'all' });
-    expect(api).toHaveBeenCalledWith('/api/v1/masters?status=all', expect.anything());
+    await getLocations({ status: 'all' });
+    expect(api).toHaveBeenCalledWith('/api/v1/locations?status=all', expect.anything());
   });
 
   it('serializes status=active into the URL', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters({ status: 'active' });
-    expect(api).toHaveBeenCalledWith('/api/v1/masters?status=active', expect.anything());
+    await getLocations({ status: 'active' });
+    expect(api).toHaveBeenCalledWith('/api/v1/locations?status=active', expect.anything());
   });
 
   it('omits status when null', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters({ status: null });
-    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+    await getLocations({ status: null });
+    expect(api).toHaveBeenCalledWith('/api/v1/locations', expect.anything());
   });
 
   it('omits status when not provided', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters({});
-    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+    await getLocations({});
+    expect(api).toHaveBeenCalledWith('/api/v1/locations', expect.anything());
   });
 });
 
@@ -2768,17 +2754,17 @@ describe('listQuery status param', () => {
 describe('listQuery sort params', () => {
   it('serializes sort_by and sort_order into the URL', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 50 });
-    await getMasters({ page: 2, per_page: 50, sort_by: 'name', sort_order: 'desc' });
+    await getLocations({ page: 2, per_page: 50, sort_by: 'name', sort_order: 'desc' });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/masters?page=2&per_page=50&sort_by=name&sort_order=desc',
+      '/api/v1/locations?page=2&per_page=50&sort_by=name&sort_order=desc',
       expect.anything(),
     );
   });
 
   it('omits sort params when not provided', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters({});
-    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+    await getLocations({});
+    expect(api).toHaveBeenCalledWith('/api/v1/locations', expect.anything());
   });
 });
 
@@ -2839,9 +2825,9 @@ describe('getAllTags', () => {
 describe('listQuery q param (GH #212)', () => {
   it('serializes q into the URL', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters({ q: 'анна' });
+    await getLocations({ q: 'анна' });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/masters?q=%D0%B0%D0%BD%D0%BD%D0%B0',
+      '/api/v1/locations?q=%D0%B0%D0%BD%D0%BD%D0%B0',
       expect.anything(),
     );
   });
@@ -2857,8 +2843,8 @@ describe('listQuery q param (GH #212)', () => {
 
   it('omits q when empty string (server requires min 2 chars)', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
-    await getMasters({ q: '' });
-    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+    await getLocations({ q: '' });
+    expect(api).toHaveBeenCalledWith('/api/v1/locations', expect.anything());
   });
 });
 

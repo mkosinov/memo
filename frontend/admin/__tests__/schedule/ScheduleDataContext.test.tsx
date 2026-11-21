@@ -30,7 +30,6 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return {
     ...actual,
-    getMasters: vi.fn(),
     getLocations: vi.fn(),
     getServices: vi.fn(),
     getActivities: vi.fn(),
@@ -66,7 +65,6 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 import {
-  getMasters,
   getLocations,
   getServices,
   getActivities,
@@ -596,7 +594,8 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
     });
 
     // Paginated lookups must NOT be used for the cached reference data
-    expect(getMasters).not.toHaveBeenCalled();
+    // (#606: the paginated /masters getter is gone from the api-client —
+    // getAllMasters above is the only masters source)
     expect(getServices).not.toHaveBeenCalled();
     expect(getLocations).not.toHaveBeenCalled();
   });

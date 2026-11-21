@@ -5,7 +5,6 @@ import type { ReactNode } from 'react';
 
 // Mock api-client endpoints
 vi.mock('@memo/api-client', () => ({
-  getMasters: vi.fn(),
   getLocations: vi.fn(),
   getServices: vi.fn(),
   getActivities: vi.fn(),
@@ -35,7 +34,6 @@ vi.mock('@/lib/transformers', () => ({
 }));
 
 import {
-  getMasters,
   getLocations,
   getServices,
   getAllMasters,
@@ -211,7 +209,8 @@ describe('useMasters', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(getAllMasters).toHaveBeenCalledOnce();
-    expect(getMasters).not.toHaveBeenCalled();
+    // #606: the paginated /masters getter is gone from the api-client —
+    // getAllMasters above is the only masters source.
     expect(transformMaster).toHaveBeenCalledWith(
       mastersFixture[0],
       expect.any(Number),

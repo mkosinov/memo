@@ -34,19 +34,37 @@ assert in the template test.
 ``test_marker_with_non_empty_tail_fails_with_line``,
 ``test_unclosed_quoted_cell_reports_record_start``,
 ``test_multiline_quoted_field_error_cites_record_start``.
+
+№4 extra-column warnings — load level: ``test_extra_column_is_reported_and_ignored``
++ ``test_extra_column_warning_printed_after_summary`` +
+``test_services_is_public_column_is_extra_and_ignored``; CLI level (printed in
+EVERY mode): ``test_extra_column_warning_printed_in_every_mode``.
+
+№5 input errors — load level in №1–№3 above; full matrix at CLI level with
+exit 1 + stderr message: ``test_input_error_branches_exit_1_with_message``
+and ``test_each_required_section_is_mandatory`` (load level, all 8 sections);
+exit-2 usage errors: ``test_check_and_dry_run_together_exit_2``,
+``test_missing_csv_flag_exit_2``; --check summary without any DB:
+``test_check_prints_summary_without_touching_db``.
+
+№9 dry-run — ``test_dry_run_on_in_memory_db_prints_summary_and_changes_nothing``
+(in-memory shared-cache DB, summary printed, DB content unchanged) +
+``test_dry_run_rolls_back_all_csv_writes`` (file DB, rollback).
 """
 
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
 from src.db.base import Base
 from src.db.database import DBManager
-from src.models import Location, Position
+from src.models import Location, Position, Service, Staff
 from src.models.enums import TariffAudience
 from src.seed.reference import (
     CSV_SECTIONS,
@@ -61,6 +79,7 @@ from src.seed.reference import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 pytestmark = pytest.mark.misc
@@ -829,3 +848,251 @@ def test_marker_with_non_empty_tail_fails_with_line(csv_path: Path) -> None:
 
     with pytest.raises(SeedDataError, match=r"строка 9 .*первая колонка должна быть пустой"):
         load_reference_data(csv_path)
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 items №4/№5/№9 (issue #612 Task 3): CLI exit-code discipline and
+# mode coverage. The audit found the salvaged CLI already implements every
+# bullet — these tests close the missing §6 matrices: exit 1 for EVERY input
+# error branch at main() level (previously load-level only, and five branches
+# untested anywhere), exit 2 for usage errors, --check summary without a DB,
+# extra-column warnings in ALL three modes, and the dry-run on an in-memory
+# DB (summary printed + content unchanged).
+# ---------------------------------------------------------------------------
+
+_BUILTIN_POSITIONS = (
+    Position(id="master", title="Мастер", is_system=True),
+    Position(id="admin", title="Администратор", is_system=True),
+)
+
+
+def _mutated(csv_path: Path, original: str, replacement: str) -> Path:
+    """Apply a single text mutation to the CSV copy, asserting it hit."""
+    text = csv_path.read_text(encoding="utf-8")
+    assert original in text, f"mutation source not found: {original!r}"
+    csv_path.write_text(text.replace(original, replacement), encoding="utf-8")
+    return csv_path
+
+
+def _memory_db(monkeypatch: pytest.MonkeyPatch, name: str) -> tuple[str, sqlite3.Connection]:
+    """A shared-cache IN-MEMORY DB the CLI's own engine can reach (spec §6 №9).
+
+    A raw ``sqlite3`` keeper connection holds the memory DB alive across the
+    ``main()`` call (its engine connects/disposes on its own); the schema and
+    the migration-seeded builtin positions mirror the ``db_manager`` fixture.
+    Returns the URI path (``file:…?mode=memory&cache=shared``) and the keeper.
+    """
+    uri = f"file:{name}?mode=memory&cache=shared&uri=true"
+    keeper = sqlite3.connect(uri, uri=True)
+    engine = create_engine(f"sqlite:///{uri}", future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            session.add_all(
+                Position(id=row.id, title=row.title, is_system=row.is_system)
+                for row in _BUILTIN_POSITIONS
+            )
+            session.commit()
+    finally:
+        engine.dispose()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{uri}")
+    return uri, keeper
+
+
+def test_check_and_dry_run_together_exit_2(csv_path: Path) -> None:
+    """Spec §1 / §6 №5: ``--check`` and ``--dry-run`` are mutually exclusive —
+    argparse rejects the pair as a USAGE error (exit 2, not a data error 1)."""
+    with pytest.raises(SystemExit) as raised:
+        main(["--csv", str(csv_path), "--check", "--dry-run"])
+    assert raised.value.code == 2
+
+
+def test_missing_csv_flag_exit_2() -> None:
+    """Spec §1: ``--csv`` is required — omitting it is a usage error (exit 2)."""
+    with pytest.raises(SystemExit) as raised:
+        main([])
+    assert raised.value.code == 2
+
+
+# Spec §6 №5: every input-error branch through main() — exit 1 + a clear
+# operator-facing message on stderr («внятная ошибка»), not a traceback.
+_INPUT_ERROR_CASES: list[tuple[str, Callable[[Path], Path], str]] = [
+    (
+        "нет файла",
+        lambda p: p.with_name("missing.csv"),
+        "не найден или это не файл",
+    ),
+    (
+        "каталог вместо файла",
+        lambda p: p.parent,
+        "Ожидался CSV-файл, получена папка",
+    ),
+    (
+        "файл без секций",
+        lambda p: _write_csv(p.with_name("no-sections.csv"), "\n\n"),
+        "CSV не содержит секций",
+    ),
+    (
+        "нет обязательной секции",
+        lambda p: _write_csv(p, _drop_section(p.read_text(encoding="utf-8"), "positions")),
+        "отсутствуют обязательные секции: positions",
+    ),
+    (
+        "неизвестная секция",
+        lambda p: _mutated(p, "\nmaterials\n", "\nunknown_section\n"),
+        "неизвестная секция",
+    ),
+    (
+        "повтор секции",
+        lambda p: _mutated(
+            p, "\ntags\n", "\nmaterials\n;title\n;Дополнительный материал\n\ntags\n"
+        ),
+        "секция materials повторяется",
+    ),
+    (
+        "шапка без обязательной колонки",
+        lambda p: _mutated(
+            p,
+            ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags",
+            ";title;description;image_url;min_age;max_age;duration;record_info;tags",
+        ),
+        "нет обязательных колонок: specialty",
+    ),
+    (
+        "дубль имени колонки",
+        lambda p: _mutated(
+            p,
+            ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags",
+            ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags;tags",
+        ),
+        "повтор колонки tags",
+    ),
+    (
+        "строка данных короче шапки",
+        lambda p: _mutated(
+            p,
+            ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+            ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90",
+        ),
+        "в строке 7 колонок данных, в шапке 9",
+    ),
+    (
+        "строка данных длиннее шапки",
+        lambda p: _mutated(
+            p,
+            ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+            ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;",
+        ),
+        "в строке 10 колонок данных, в шапке 9",
+    ),
+    (
+        "битая кавычка",
+        lambda p: _mutated(p, "Демонстрационная услуга", '"Демонстрационная услуга'),
+        "ошибка CSV",
+    ),
+]
+
+
+def _write_csv(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    ("case", "prepare", "fragment"),
+    _INPUT_ERROR_CASES,
+    ids=[case for case, _, _ in _INPUT_ERROR_CASES],
+)
+def test_input_error_branches_exit_1_with_message(
+    csv_path: Path,
+    case: str,
+    prepare: Callable[[Path], Path],
+    fragment: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec §6 №5 / DoD Task 3: each input-error branch surfaces through the
+    CLI as exit 1 with a clear Russian message on stderr."""
+    broken = prepare(csv_path)
+    assert main(["--csv", str(broken), "--check"]) == 1
+    assert fragment in capsys.readouterr().err
+
+
+def test_check_prints_summary_without_touching_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec §2 scenario 1 / §6 DoD: ``--check`` = parser + cross-validation +
+    per-section entity summary, with NO database work — a poisoned
+    DATABASE_URL (unopenable path) proves the seam: any connection attempt
+    would fail the run."""
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:////nonexistent-dir-612/memo.db")
+    assert main(["--csv", str(DEFAULT_CSV), "--check"]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "локаций 1, услуг 1, тегов 1, материалов 1, направлений 2, "
+        "сотрудников 1, должностей 2" in out
+    )
+    assert "Проверка пройдена" in out
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [["--check"], ["--dry-run"], []],
+    ids=["check", "dry-run", "apply"],
+)
+def test_extra_column_warning_printed_in_every_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: list[str],
+) -> None:
+    """Spec §6 №4 + Task 3 bullet: the extra-column warning (the «секция +
+    колонка» list) prints in EVERY mode — --check, --dry-run and the real
+    apply run — and never fails the run (exit 0)."""
+    text = DEFAULT_CSV.read_text(encoding="utf-8")
+    text = text.replace(
+        ";record_info;tags\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";record_info;tags;legacy_flag\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;unused",
+    )
+    csv_file = _write_csv(tmp_path / "reference.csv", text)
+
+    slug = "_".join(flag.lstrip("-").replace("-", "_") for flag in mode) or "apply"
+    _, keeper = _memory_db(monkeypatch, f"seed612_warn_{slug}")
+    try:
+        assert main(["--csv", str(csv_file), *mode]) == 0
+        assert "лишняя колонка services.legacy_flag" in capsys.readouterr().out
+    finally:
+        keeper.close()
+
+
+def test_dry_run_on_in_memory_db_prints_summary_and_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Spec §6 №9: dry-run is a FULL apply pass on an in-memory DB inside a
+    rolled-back transaction — the summary prints, and the DB content is
+    exactly what it was before the run (only the migration-seeded builtin
+    positions)."""
+    uri, keeper = _memory_db(monkeypatch, "seed612_dryrun")
+    try:
+        assert main(["--csv", str(DEFAULT_CSV), "--dry-run"]) == 0
+
+        out = capsys.readouterr().out
+        assert "Итог:" in out
+        assert "Локации: создано 1, обновлено 0, без изменений 0" in out
+        assert "Услуги: создано 1, обновлено 0, без изменений 0" in out
+        assert "ПРОБНЫЙ ЗАПУСК: изменения откатаны, база не изменена." in out
+
+        engine = create_engine(f"sqlite:///{uri}", future=True)
+        try:
+            with Session(engine) as session:
+                assert list(session.scalars(select(Location))) == []
+                assert list(session.scalars(select(Service))) == []
+                assert list(session.scalars(select(Staff))) == []
+                assert sorted(
+                    (row.id, row.title) for row in session.scalars(select(Position))
+                ) == [("admin", "Администратор"), ("master", "Мастер")]
+        finally:
+            engine.dispose()
+    finally:
+        keeper.close()

@@ -48,6 +48,14 @@ export const SERVICES_SORT_FIELDS = [
 /** Materials sort whitelist = backend MaterialSortBy Literal (schemas/material.py). */
 export const MATERIALS_SORT_FIELDS = ['title', 'description', 'archived', 'created_at'] as const;
 
+/**
+ * Specialties sort whitelist — EMPTY by design (GH #599 Task 8.1, the
+ * positions dictionary precedent): every column of the specialties table is
+ * `sortable: false` — GET /api/v1/specialties accepts pagination only, the
+ * backend order is fixed at `title ASC, id ASC`.
+ */
+export const SPECIALTIES_SORT_FIELDS = [] as const;
+
 export const SERVICES_URL_DEFAULT_STATUS: ArchiveFilter = 'active';
 export const MATERIALS_URL_DEFAULT_STATUS: ArchiveFilter = 'active';
 
@@ -98,8 +106,21 @@ export const materialsUrlConfig = {
   mat_per_page: { kind: 'enum', values: [10, 20, 50, 100] as const, defaultValue: 10 },
 } satisfies TableUrlConfig;
 
+/**
+ * Specialties half — pagination only under the `spec_` prefix (GH #599
+ * Task 8.1, the mat_ precedent). The dictionary has no search, no archive
+ * status and no sort (the backend list is `title ASC, id ASC` — the
+ * positions precedent), so the config carries just spec_page/spec_per_page;
+ * everything else on the URL passes through as unmanaged params.
+ */
+export const specialtiesUrlConfig = {
+  spec_page: { kind: 'int', min: 1, max: 10000, defaultValue: 1 },
+  spec_per_page: { kind: 'enum', values: [10, 20, 50, 100] as const, defaultValue: 10 },
+} satisfies TableUrlConfig;
+
 type ServicesUrlState = TableUrlState<typeof servicesUrlConfig>;
 type MaterialsUrlState = TableUrlState<typeof materialsUrlConfig>;
+type SpecialtiesUrlState = TableUrlState<typeof specialtiesUrlConfig>;
 // Both aliases are the hook-side patch/state types (literal-narrowed enums);
 // the ADAPTER surfaces use the explicit CanonicalTableUrlState view above —
 // same widening the clients adapter performs field-by-field.
@@ -128,6 +149,14 @@ export interface ServicesUrlAdapter {
 export interface MaterialsUrlAdapter {
   // Canonical names for the factory — the mat_ prefix never leaves this file.
   state: CanonicalTableUrlState & Record<string, unknown>;
+  update: (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => void;
+  /** Full-query replacement through the hook (single-writer escape hatch). */
+  navigate: (url: string, options?: { history?: 'push' | 'replace' }) => void;
+}
+
+export interface SpecialtiesUrlAdapter {
+  // Canonical names for the factory — the spec_ prefix never leaves this file.
+  state: { page: number; per_page: number } & Record<string, unknown>;
   update: (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => void;
   /** Full-query replacement through the hook (single-writer escape hatch). */
   navigate: (url: string, options?: { history?: 'push' | 'replace' }) => void;
@@ -241,5 +270,40 @@ export function useMaterialsUrlState(): MaterialsUrlAdapter {
       navigate,
     }),
     [matState, update, navigate],
+  );
+}
+
+/**
+ * Page-scoped URL adapter for the SPECIALTIES table (GH #599 Task 8.1, the
+ * useMaterialsUrlState precedent). Wraps the spec_-prefixed hook instance
+ * and PROJECTS its state/patches to the canonical names the factory consumes
+ * (PagedListUrlState). No filter keys exist — the factory's per-page change
+ * arrives as {per_page, page:1} in one patch and rides through as a single
+ * translated navigation; unknown patch keys are dropped defensively (the
+ * dictionary has no structured filters).
+ */
+export function useSpecialtiesUrlState(): SpecialtiesUrlAdapter {
+  const { state: specState, update: specUpdate, navigate } = useTableUrlState(specialtiesUrlConfig);
+
+  const update = useCallback(
+    (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => {
+      const translated: Partial<SpecialtiesUrlState> = {};
+      if ('page' in patch) translated.spec_page = patch.page as number;
+      if ('per_page' in patch) translated.spec_per_page = patch.per_page as never;
+      specUpdate(translated, options);
+    },
+    [specUpdate],
+  );
+
+  return useMemo(
+    () => ({
+      state: {
+        page: Number(specState.spec_page),
+        per_page: Number(specState.spec_per_page),
+      },
+      update,
+      navigate,
+    }),
+    [specState, update, navigate],
   );
 }

@@ -18,6 +18,7 @@ import type {
   StaffResponse,
   TariffResponse,
   PositionResponse,
+  SpecialtyResponse,
   MyProfile,
   AuditLogResponse,
   AuditLogAuthorResponse,
@@ -593,3 +594,41 @@ export const LEGACY_SEED_SPELLINGS: Array<[string, string]> = [
   ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
   ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
 ];
+
+// ─── SpecialtyResponse (specialties dictionary, GH #599 Task 8) ────────────
+// The seed dictionary rows (seed-data/specialties.yaml): every row is
+// user-defined (uuid ids, no is_system — unlike positions). Consumers: the
+// «Направления» tab of /services (SpecialtiesTable) and the Task 8.2/8.3
+// dropdown/checkbox consumers.
+
+/** Seed row «Живопись» — the default factory base. */
+export const mockSpecialtyPainting: SpecialtyResponse = {
+  id: 'spec-painting',
+  title: 'Живопись',
+  created_at: '2024-01-01T10:00:00Z',
+  updated_at: '2024-01-01T10:00:00Z',
+};
+
+/** Seed row «Керамика» — the second dictionary entry. */
+export const mockSpecialtyCeramics: SpecialtyResponse = {
+  id: 'spec-ceramics',
+  title: 'Керамика',
+  created_at: '2024-01-01T10:00:00Z',
+  updated_at: '2024-01-01T10:00:00Z',
+};
+
+/** The whole seed dictionary — the shape the paged /specialties list returns. */
+export const mockSpecialties: SpecialtyResponse[] = [
+  mockSpecialtyPainting,
+  mockSpecialtyCeramics,
+];
+
+/** Factory for creating SpecialtyResponse objects with overrides. */
+export function createMockSpecialtyResponse(
+  overrides: Partial<SpecialtyResponse> = {},
+): SpecialtyResponse {
+  return {
+    ...mockSpecialtyPainting,
+    ...overrides,
+  };
+}

@@ -9,19 +9,21 @@ import { QueryClient } from '@tanstack/react-query';
 
 /**
  * Drift guard (spec §4.1): the backend canonical entity list —
- * backend/src/events/entities.py. Backend emits 16 names (GH #266: +staff,
- * +positions) incl. `users` (StaffService.archive/restore also flips
- * user.is_active) and `positions` (PositionService — admin has no positions
- * query family); they have NO frontend query family, so the map covers the
- * other 14 and unknown names are skipped at runtime by invalidateEntities
- * (dev-mode log).
+ * backend/src/events/entities.py. Backend emits 17 names (GH #266: +staff,
+ * +positions; GH #599: +specialties — SpecialtyService is a plain
+ * GenericService, the entities walk maps it) incl. `users`
+ * (StaffService.archive/restore also flips user.is_active), `positions`
+ * (PositionService) and `specialties` (the dictionary screen relies on its
+ * own mutation invalidation — the positions SSE-omission rule); they have
+ * NO INVALIDATION_MAP entry, so the map covers the other 14 and unknown
+ * names are skipped at runtime by invalidateEntities (dev-mode log).
  */
 const BACKEND_ENTITIES = [
   'clients', 'records', 'activities', 'masters', 'services', 'locations',
   'materials', 'tags', 'photos', 'visitors', 'visits', 'payments', 'user_settings',
   'staff',
 ];
-const BACKEND_ONLY_NO_FRONTEND_CACHE = ['users', 'positions'];
+const BACKEND_ONLY_NO_FRONTEND_CACHE = ['users', 'positions', 'specialties'];
 
 describe('INVALIDATION_MAP', () => {
   it('targets are real qk exports or real query-family prefixes', () => {

@@ -64,6 +64,12 @@ export const qk = {
   // the frontend mirror has no positions family); own mutations invalidate the
   // prefix directly (hooks/usePositionsMutations.ts).
   positions: ['positions'] as const,
+  // GH #599: specialties dictionary prefix — shared by the paged table
+  // (contexts/SpecialtiesContext.tsx, the «Направления» tab of /services) and
+  // the future /all lookup consumers (Task 8.2/8.3 dropdowns). Same SSE-omission
+  // rule as positions: not in the invalidate map, own mutations invalidate the
+  // prefix directly (hooks/useSpecialtiesMutations.ts).
+  specialties: ['specialties'] as const,
   services: ['services'] as const,
   locations: ['locations'] as const,
   materials: ['materials'] as const,

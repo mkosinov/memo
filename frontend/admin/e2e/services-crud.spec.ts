@@ -19,6 +19,7 @@ import {
   cleanupRecord,
 } from './fixtures/factories';
 import { seedId, seedRecordIdByClientName, seedTariffId } from './fixtures/seed-ids';
+import { queryDBRow } from './fixtures/db-query';
 
 /**
  * E2E tests for Services page: table rendering, CRUD operations,
@@ -153,6 +154,9 @@ test.beforeAll(() => {
   T7A = seedTariffId('Морской пейзаж', 'Взрослый');
   T7C = seedTariffId('Морской пейзаж', 'Детский');
   T7I = seedTariffId('Морской пейзаж', 'Индивидуальный');
+  // GH #599 §7.1: the free seed dictionary leaf «Декор» — the direction the
+  // scenario-1 create picks in the modal's dictionary select.
+  DECOR = seedId('specialties', 'title', 'Декор');
 });
 
 
@@ -167,6 +171,7 @@ let T5I = '';
 let T7A = '';
 let T7C = '';
 let T7I = '';
+let DECOR = '';
 
 /** Tariff shape on GET /api/v1/services/{id} (fields the scenarios assert). */
 interface TariffPayload {
@@ -488,6 +493,106 @@ test.describe('Services — family delete with visited tariffs (GH #357 US-5)', 
       await cleanup(request, `/api/v1/activities/${activity.id}`);
       await cleanup(request, `/api/v1/clients/${client.id}`);
       await cleanup(request, `/api/v1/services/${dead.id}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GH #599 §7 scenario 1 — the service direction is a dictionary SELECT:
+// create a service with the direction picked from the dropdown, the table
+// shows the direction. The sorting tail of §7 rides along: the services
+// list sorted by `specialty` orders rows by the linked dictionary title.
+// ---------------------------------------------------------------------------
+
+test.describe('Services — dictionary direction (GH #599 §7 scenario 1)', () => {
+  test('create picks the direction in the dictionary select; the table shows it', async ({
+    page,
+    request,
+  }) => {
+    // Three UI phases on a cold dev-server compile — the services-crud
+    // 120s precedent.
+    test.setTimeout(120_000);
+    const title = `E2e Направленная ${Date.now()}`;
+    let serviceId = '';
+
+    try {
+      // 1. SETUP — the services table loaded wide enough for the row assert.
+      await waitForServicesReady(page);
+      await page.getByTestId('page-size-select').selectOption('100');
+
+      // 2. ACTION — create modal: title + duration + the direction CHOSEN
+      // in the dictionary select (manual input is impossible — a native
+      // select fed by /specialties/all).
+      await page.click('text=+ Добавить услугу');
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible({ timeout: 10_000 });
+      await expect(dialog.getByText('Новая услуга')).toBeVisible();
+
+      const select = dialog.locator('[data-testid="service-specialty-select"]');
+      await expect(select).toBeVisible();
+      // The empty state is the placeholder option, not a preselected value.
+      await expect(select).toHaveValue('');
+      await select.selectOption({ label: 'Декор' });
+      await expect(select).toHaveValue(DECOR);
+
+      await dialog.getByPlaceholder('Мастер-класс по рисованию').fill(title);
+      await dialog.getByLabel('Длительность').fill('90');
+
+      const created = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/services') && r.request().method() === 'POST',
+        { timeout: 20_000 },
+      );
+      await dialog.getByRole('button', { name: 'Сохранить' }).click();
+      const resp = await created;
+      expect(resp.status()).toBe(201);
+      const body = (await resp.json()) as { id: string; specialty_id: string; specialty: string };
+      serviceId = body.id;
+      // The wire carries the dictionary FK; the response echoes the display title.
+      expect(body.specialty_id).toBe(DECOR);
+      expect(body.specialty).toBe('Декор');
+
+      // 3. VERIFY UI — toast + modal closed + the TABLE shows the direction
+      // («Специализация» ships hidden — defaultVisible: false — so flip it
+      // on through the column picker first, the §7.4 precedent).
+      await waitForToast(page, 'Услуга создана');
+      await expect(dialog).toHaveCount(0);
+      await page.click('[aria-label="Настроить колонки"]');
+      await expect(page.getByText('Специализация').first()).toBeVisible();
+      await page.getByText('Специализация').first().click();
+      await page.keyboard.press('Escape');
+
+      const row = page.locator('table tbody tr').filter({ hasText: title });
+      await expect(row).toHaveCount(1);
+      await expect(row).toContainText('Декор');
+
+      // 4. VERIFY DB — the FK landed.
+      expect(
+        queryDBRow(`SELECT specialty_id FROM services WHERE id='${serviceId}'`),
+      ).toMatchObject({ specialty_id: DECOR });
+
+      // 5. VERIFY SORT (§7 tail) — the list ordered by `specialty` sorts by
+      // the linked dictionary title: «Декор» (Д) precedes every «Живопись»
+      // (Ж) and «Керамика» (К) row on the same page.
+      const sortedResp = await request.get(
+        `${BACKEND}/api/v1/services?sort_by=specialty&sort_order=asc&per_page=100`,
+      );
+      expect(sortedResp.ok()).toBeTruthy();
+      const items = ((await sortedResp.json()) as {
+        items: { id: string; specialty: string }[];
+      }).items;
+      const myIdx = items.findIndex((s) => s.id === serviceId);
+      expect(myIdx).toBeGreaterThanOrEqual(0);
+      for (const later of ['Живопись', 'Керамика']) {
+        const idx = items.findIndex((s) => s.specialty === later);
+        if (idx >= 0) {
+          expect(myIdx, `sorted-by-specialty: «Декор» must precede «${later}»`).toBeLessThan(idx);
+        }
+      }
+    } finally {
+      // 6. CLEANUP — free the dictionary leaf back.
+      if (serviceId) {
+        await cleanup(request, `/api/v1/services/${serviceId}`);
+      }
     }
   });
 });

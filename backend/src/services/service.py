@@ -680,6 +680,12 @@ async def list_public_services_view(
             selectinload(Service.tariffs),
             selectinload(Service.tags),
             selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
+            # GH #599+#606 post-merge: ``_public_item`` reads the display
+            # property ``service.specialty`` — over ``specialty_ref`` — so
+            # the relationship MUST ride the statement (the ``get``
+            # precedent); under async SQLAlchemy the implicit lazy load
+            # raises MissingGreenlet on the first mapped row.
+            joinedload(Service.specialty_ref),
         )
         .order_by(asc(Service.title), asc(Service.id))
         .limit(BARE_LIST_MAX_ROWS + 1)

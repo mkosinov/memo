@@ -118,8 +118,7 @@ export function SpecialtyModal({
       await onSubmit(formData);
       onClose();
     } catch {
-      // Toast handled by caller — the modal stays open so the user can fix
-      // the title (e.g. a 409 SPECIALTY_TITLE_TAKEN case-variant collision).
+      // Toast handled by caller
     } finally {
       setIsSubmitting(false);
     }

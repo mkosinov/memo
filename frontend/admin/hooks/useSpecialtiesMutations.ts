@@ -25,6 +25,7 @@ import {
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { useUI } from '@/contexts/UIContext';
 import { UNDO_WINDOW_MS } from '@/lib/constants';
+import { expectedFromDependencies } from '@/lib/expectedFromDependencies';
 import { staleAwareOnError } from '@/lib/staleAwareOnError';
 import { qk } from '@/lib/queryKeys';
 
@@ -87,18 +88,6 @@ export function useUpdateSpecialty() {
  * (the paged envelope now + the /all lookup list once Task 8.2/8.3 lands it)
  * via the shared factory. */
 const specialtyRowSync = createRowSnapshotSync(qk.specialties);
-
-/** expected = id-sets per entity from the dialog tree's `items` (D6). */
-function expectedFromDependencies(
-  dependencies: DependencyNode[],
-): Record<string, string[]> {
-  const expected: Record<string, string[]> = {};
-  for (const node of dependencies) {
-    if (!node.items) continue;
-    expected[node.entity] = node.items.map((item) => item.id);
-  }
-  return expected;
-}
 
 /** Specialties cache shapes: the paged envelope (+ the /all bare array once
  * the lookup consumers land). */

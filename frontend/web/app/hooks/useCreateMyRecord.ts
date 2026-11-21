@@ -29,7 +29,8 @@ export interface MyRecordSubmission {
   reset: () => void;
 }
 
-/** `POST /api/v1/my/records` submission state (#499 spec §5). */
+/** `POST /api/v1/my/client/records` submission state (#499 spec §5; #584
+ * §4.2 moved the booking branch under /my/client). */
 export function useCreateMyRecord(): MyRecordSubmission {
   const [status, setStatus] = useState<MyRecordStatus>("idle");
   const [error, setError] = useState<string | null>(null);

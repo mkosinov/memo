@@ -58,7 +58,7 @@ def _admin_hash() -> str:
 
 @pytest.fixture
 def _sse_cookie(app, db_engine, _admin_hash) -> str:
-    """``memo_session=<token>`` header value for a fresh admin login."""
+    """``memo_staff_session=<token>`` header value for a fresh admin login."""
     phone = f"+7999{uuid.uuid4().hex[:7]}"
     insert_user(phone, _admin_hash, role="admin")
 
@@ -67,10 +67,10 @@ def _sse_cookie(app, db_engine, _admin_hash) -> str:
         "/api/v1/auth/login", json={"phone": phone, "password": _PASSWORD}
     )
     assert resp.status_code == 200, resp.text
-    token = client.cookies.get("memo_session")
-    assert token, "no memo_session cookie after login"
+    token = client.cookies.get("memo_staff_session")
+    assert token, "no memo_staff_session cookie after login"
     client.close()
-    return f"memo_session={token}"
+    return f"memo_staff_session={token}"
 
 
 def _http_scope(

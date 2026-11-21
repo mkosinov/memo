@@ -1,6 +1,23 @@
-import { describe, it, expect } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { useColumnReorder } from '../hooks/useColumnReorder';
+
+// #584 §5: the masters-column persistence rides the whoami-computed branch —
+// patchUserSettings(branch, { column_order_staff }). The api boundary and the
+// auth hook are mocked (repo pattern).
+const apiMocks = vi.hoisted(() => ({
+  patchUserSettings: vi.fn().mockResolvedValue(undefined),
+  reorderLocations: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@memo/api-client', () => ({
+  patchUserSettings: (...args: unknown[]) => apiMocks.patchUserSettings(...args),
+  reorderLocations: (...args: unknown[]) => apiMocks.reorderLocations(...args),
+}));
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ branch: 'master' }),
+}));
 
 // #301 (react-hooks/exhaustive-deps): adding `initialOrder` to the reconcile
 // effect's deps must NOT change the initialize-once contract. These tests pin
@@ -17,6 +34,11 @@ const COLS: Column[] = [
   { id: 'b', name: 'B', sortOrder: 1 },
   { id: 'c', name: 'C', sortOrder: 2 },
 ];
+
+beforeEach(() => {
+  apiMocks.patchUserSettings.mockClear();
+  apiMocks.reorderLocations.mockClear();
+});
 
 describe('useColumnReorder — initialize-once contract with initialOrder in deps', () => {
   it('seeds columnOrder from initialOrder on first initialization', () => {
@@ -67,5 +89,22 @@ describe('useColumnReorder — initialize-once contract with initialOrder in dep
     rerender({ ...initialProps, columns: [...COLS, { id: 'd', name: 'D', sortOrder: 2 }] });    expect(result.current.columnOrder).toContain('d');
     expect(result.current.columnOrder.slice(0, 3)).toEqual(['a', 'b', 'c']);
     expect(result.current.orderedColumns.map((c) => c.id)).toContain('d');
+  });
+
+  it('masters mode persists column_order_staff via patchUserSettings(branch, …)', async () => {
+    const { result } = renderHook(() =>
+      useColumnReorder({ columns: COLS, columnMode: 'masters', initialOrder: ['b', 'c', 'a'] }),
+    );
+
+    act(() => result.current.onColumnDrop('a', 'b'));
+
+    expect(result.current.columnOrder).toEqual(['a', 'b', 'c']);
+    await waitFor(() => {
+      expect(apiMocks.patchUserSettings).toHaveBeenCalledWith('master', {
+        column_order_staff: ['a', 'b', 'c'],
+      });
+    });
+    // The locations corridor stays untouched in masters mode.
+    expect(apiMocks.reorderLocations).not.toHaveBeenCalled();
   });
 });

@@ -900,6 +900,121 @@ describe('SettingsTab — capacity gate (вместимость ≥ 1, GH #280)'
   });
 });
 
+// ─── SettingsTab — datetime patch source (GH #553: полная дата) ─────────────
+// The datetime instant-patch sends the FULL calendar date — `{ start }` from
+// composeLocalISO(datePart, snappedMinutes), the same floating-local ISO the
+// create form sends (#280). The chosen date is no longer discarded; the legacy
+// `dayIndex + startMinutes` keys belong to the grid senders (dnd, slot stamps)
+// and must NOT appear in the form's payload. Empty/partial field values send
+// nothing at all (broken `start` in PATCH is impossible by construction).
+
+describe('SettingsTab — datetime patch sends full date (GH #553)', () => {
+  it('sends { start } with the chosen full date+snapped time, not dayIndex + startMinutes', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-datetime');
+    // 14:25 snaps to 14:30 on the 30-min grid (mockGridSettings)
+    fireEvent.change(input, { target: { value: '2026-06-09T14:25' } });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).toHaveBeenCalledWith({ start: '2026-06-09T14:30:00' });
+    // the legacy grid keys must not ride along
+    const payload = onUpdate.mock.calls[0][0];
+    expect(payload).not.toHaveProperty('dayIndex');
+    expect(payload).not.toHaveProperty('startMinutes');
+  });
+
+  it('keeps the chosen date outside the open week (date is not discarded)', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-datetime');
+    // mockActivity sits on 2026-06-13; pick a date from a DIFFERENT week
+    fireEvent.change(input, { target: { value: '2026-07-01T10:00' } });
+    expect(onUpdate).toHaveBeenCalledWith({ start: '2026-07-01T10:00:00' });
+  });
+
+  it('does not patch when the field is cleared (empty value)', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-datetime');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// ─── GH #553: тост успеха патча даты-времени (уровень модалки) ───────────────
+// Единственный «озвученный» instant-patch: успешный start-патч может увезти
+// занятие из открытой недели (карточка «исчезнет» по рефетчу) — успех сопровождается
+// тостом общего стека, текст зеркален созданию («Сохранено: <услуга> — <дата>,
+// <время>»), вид — дефолтный info (toast-info). Остальные поля молчат; реджект —
+// молчаливый откат (error-тоста у обновления занятия нет); модалка не закрывается
+// ни при каком исходе (решение гейта B).
+
+describe('ActivityDetailsModal — date-time patch success toast (GH #553)', () => {
+  it('shows the «Сохранено: …» toast (default info kind) when a start patch resolves; modal stays open', async () => {
+    const updateActivity = vi.fn(() => Promise.resolve());
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ updateActivity }));
+    const onClose = vi.fn();
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={onClose} activity={mockActivity} mode="edit" />,
+    );
+
+    // 14:25 snaps to 14:30 on the 30-min grid (same trigger as the SettingsTab
+    // payload test above) → { start: '2026-06-09T14:30:00' }
+    fireEvent.change(screen.getByTestId('input-datetime'), { target: { value: '2026-06-09T14:25' } });
+    expect(updateActivity).toHaveBeenCalledWith(mockActivity.id, { start: '2026-06-09T14:30:00' });
+
+    // Toast fires in the mutation's .then — service name resolves via the
+    // context services list (s1 = «Картина маслом»), date-time via the shared
+    // datetime helpers from updates.start. Single-arg call = default info
+    // kind (→ toast-info in the real stack).
+    const { showToast } = mockUseUI();
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('Сохранено: Картина маслом — вторник, 9 июня, 14:30'),
+    );
+    // Gate B: the modal never closes on a date-time patch outcome.
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('stays silent on non-start patches (other instant-patch fields keep today’s behavior)', async () => {
+    const updateActivity = vi.fn(() => Promise.resolve());
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ updateActivity }));
+    const showToast = vi.fn();
+    mockUseUI.mockReturnValue(createMockUIContext({ showToast }));
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    // A capacity instant-patch (>= 1 gate) resolves fine — but no toast.
+    fireEvent.change(screen.getByTestId('input-capacity'), { target: { value: '10' } });
+    expect(updateActivity).toHaveBeenCalledWith(mockActivity.id, { capacity: 10 });
+
+    // Settle anchor (mutation promise flushed inside act) before the negative
+    // assert, so a late toast cannot silently green the test.
+    await act(async () => {});
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('shows no success toast when the start patch rejects (silent rollback, as today)', async () => {
+    const updateActivity = vi.fn(() => Promise.reject(new Error('server down')));
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ updateActivity }));
+    const showToast = vi.fn();
+    mockUseUI.mockReturnValue(createMockUIContext({ showToast }));
+    const onClose = vi.fn();
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={onClose} activity={mockActivity} mode="edit" />,
+    );
+
+    fireEvent.change(screen.getByTestId('input-datetime'), { target: { value: '2026-06-09T14:25' } });
+
+    // Rejection settled: rollback is the mutation's business, the patch stays
+    // silent (no error toast for activity updates, no success toast either),
+    // and the rejection must not surface as unhandled.
+    await act(async () => {});
+    expect(showToast).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
 
 describe('ClientTab — layout & features', () => {

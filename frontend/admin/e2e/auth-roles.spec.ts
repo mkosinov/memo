@@ -66,8 +66,10 @@ test.describe('User Scenario 2 — master signs in (role menu)', () => {
     // auth-session.spec.ts. The target is a seeded client (former alias c1,
     // «Анна Иванова» — GH #491 resolves the id by phone), so the master
     // legitimately reads it (200 scoped+masked) but may not mutate.
-    const me = await page.request.get(`${BACKEND}/api/v1/auth/me`);
-    expect(me.ok()).toBeTruthy();
+    // (#584: the liveness gate is the whoami — /auth/me is deleted.)
+    const who = await page.request.get(`${BACKEND}/api/v1/my`);
+    expect(who.ok()).toBeTruthy();
+    expect((await who.json())?.roles).toContain('master');
 
     const seed = queryDBRow(
       `SELECT id FROM clients WHERE phone='+79001234567'`,

@@ -5,7 +5,7 @@
  * on close, Escape. Public half (names) is hidden ENTIRELY when
  * has_staff=false; «Специализация» is a read-only string (array joined)
  * visible only when has_master=true and is NEVER sent by PUT; the portrait
- * block uploads via uploadPortrait + refreshes the AuthContext plate and
+ * block uploads via uploadAvatar + refreshes the AuthContext plate and
  * clears via avatar_url: null; «Паспорт» carries the disabled placeholder
  * row «Фото первой страницы паспорта — появится позже».
  */
@@ -14,15 +14,15 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const mockGetMyProfile = vi.fn();
-const mockUpdateMyProfile = vi.fn();
-const mockUploadPortrait = vi.fn();
+const mockGetMyStaffProfile = vi.fn();
+const mockUpdateMyStaffProfile = vi.fn();
+const mockUploadAvatar = vi.fn();
 const mockRefresh = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@memo/api-client', () => ({
-  getMyProfile: (...args: unknown[]) => mockGetMyProfile(...args),
-  updateMyProfile: (...args: unknown[]) => mockUpdateMyProfile(...args),
-  uploadPortrait: (...args: unknown[]) => mockUploadPortrait(...args),
+  getMyStaffProfile: (...args: unknown[]) => mockGetMyStaffProfile(...args),
+  updateMyStaffProfile: (...args: unknown[]) => mockUpdateMyStaffProfile(...args),
+  uploadAvatar: (...args: unknown[]) => mockUploadAvatar(...args),
   ApiError: class ApiError extends Error {
     status: number;
     code?: string;
@@ -35,7 +35,7 @@ vi.mock('@memo/api-client', () => ({
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ refresh: mockRefresh }),
+  useAuth: () => ({ refresh: mockRefresh, branch: 'master' as const }),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -44,18 +44,18 @@ vi.mock('@/contexts/UIContext', () => ({
 const mockShowToast = vi.fn();
 
 import { MyDataModal } from '@/app/components/modal/MyDataModal';
-import type { MyProfile } from '@memo/api-client';
+import type { MyStaffProfile } from '@memo/api-client';
 import {
-  mockMyProfileMaster,
-  mockMyProfileStaffNoMaster,
-  mockMyProfileNoCard,
-  createMockMyProfile,
+  mockMyStaffProfileMaster,
+  mockMyStaffProfileStaffNoMaster,
+  mockMyStaffProfileNoCard,
+  createMockMyStaffProfile,
 } from './helpers/mockData';
 
 const PASSPORT_PHOTO_PLACEHOLDER = 'Фото первой страницы паспорта — появится позже';
 
 function renderModal(
-  profile: MyProfile | 'error' = mockMyProfileMaster,
+  profile: MyStaffProfile | 'error' = mockMyStaffProfileMaster,
   overrides: Partial<React.ComponentProps<typeof MyDataModal>> = {},
 ) {
   const queryClient = new QueryClient({
@@ -64,9 +64,9 @@ function renderModal(
   if (profile === 'error') {
     // Fix-round issue 1: a failed GET /my must render a dismissible error
     // state, not a stuck «Загрузка...».
-    mockGetMyProfile.mockRejectedValue(new Error('server down'));
+    mockGetMyStaffProfile.mockRejectedValue(new Error('server down'));
   } else {
-    mockGetMyProfile.mockResolvedValue(profile);
+    mockGetMyStaffProfile.mockResolvedValue(profile);
   }
   const onClose = overrides.onClose ?? vi.fn();
   return render(
@@ -78,14 +78,14 @@ function renderModal(
 
 /** Wait until GET /my resolved and the form fields rendered. */
 async function waitForForm() {
-  await waitFor(() => expect(mockGetMyProfile).toHaveBeenCalled());
+  await waitFor(() => expect(mockGetMyStaffProfile).toHaveBeenCalled());
   await screen.findByTestId('mydata-form');
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUpdateMyProfile.mockResolvedValue(mockMyProfileMaster);
-  mockUploadPortrait.mockResolvedValue({ avatar_url: '/api/v1/files/avatar/n.png' });
+  mockUpdateMyStaffProfile.mockResolvedValue(mockMyStaffProfileMaster);
+  mockUploadAvatar.mockResolvedValue({ avatar_url: '/api/v1/files/avatar/n.png' });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -109,7 +109,7 @@ describe('MyDataModal — role + names', () => {
   });
 
   it('hides Имя/Фамилия ENTIRELY when has_staff=false (S6)', async () => {
-    renderModal(mockMyProfileNoCard);
+    renderModal(mockMyStaffProfileNoCard);
     await waitForForm();
     expect(screen.queryByTestId('mydata-first_name')).not.toBeInTheDocument();
     expect(screen.queryByTestId('mydata-last_name')).not.toBeInTheDocument();
@@ -128,7 +128,7 @@ describe('MyDataModal — specialization (read-only, D4)', () => {
   });
 
   it('hides the specialization row when has_master=false', async () => {
-    renderModal(mockMyProfileStaffNoMaster);
+    renderModal(mockMyStaffProfileStaffNoMaster);
     await waitForForm();
     expect(screen.queryByTestId('mydata-specialties')).not.toBeInTheDocument();
     expect(screen.queryByText('Специализация')).not.toBeInTheDocument();
@@ -141,8 +141,8 @@ describe('MyDataModal — specialization (read-only, D4)', () => {
       target: { value: 'Новое' },
     });
     fireEvent.click(screen.getByTestId('mydata-submit'));
-    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
-    const payload = mockUpdateMyProfile.mock.calls[0][0];
+    await waitFor(() => expect(mockUpdateMyStaffProfile).toHaveBeenCalled());
+    const payload = mockUpdateMyStaffProfile.mock.calls[0][1];
     expect(payload).not.toHaveProperty('specialties');
   });
 });
@@ -213,31 +213,32 @@ describe('MyDataModal — portrait block', () => {
     expect(preview).toHaveAttribute('height', '64');
   });
 
-  it('«Загрузить фото» → uploadPortrait → AuthContext.refresh()', async () => {
+  it('«Загрузить фото» → uploadAvatar(branch, file) → AuthContext.refresh()', async () => {
     renderModal();
     await waitForForm();
     const input = screen.getByTestId('mydata-portrait-file');
     const file = new File(['x'], 'a.png', { type: 'image/png' });
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(mockUploadPortrait).toHaveBeenCalledWith(file));
+    // #584 §5: the avatar rides the whoami-computed branch.
+    await waitFor(() => expect(mockUploadAvatar).toHaveBeenCalledWith('master', file));
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
   });
 
-  it('«Удалить» → updateMyProfile with avatar_url: null + refresh()', async () => {
+  it('«Удалить» → updateMyStaffProfile with avatar_url: null + refresh()', async () => {
     renderModal();
     await waitForForm();
     fireEvent.click(screen.getByTestId('mydata-portrait-delete'));
 
-    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
-    expect(mockUpdateMyProfile.mock.calls[0][0]).toEqual(
+    await waitFor(() => expect(mockUpdateMyStaffProfile).toHaveBeenCalled());
+    expect(mockUpdateMyStaffProfile.mock.calls[0][1]).toEqual(
       expect.objectContaining({ avatar_url: null }),
     );
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
   });
 
   it('hides the portrait block when has_staff=false (D7)', async () => {
-    renderModal(mockMyProfileNoCard);
+    renderModal(mockMyStaffProfileNoCard);
     await waitForForm();
     expect(screen.queryByTestId('mydata-portrait-file')).not.toBeInTheDocument();
     expect(screen.queryByTestId('mydata-avatar-preview')).not.toBeInTheDocument();
@@ -253,8 +254,8 @@ describe('MyDataModal — submit + dirty guard', () => {
     });
     fireEvent.click(screen.getByTestId('mydata-submit'));
 
-    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
-    const payload = mockUpdateMyProfile.mock.calls[0][0];
+    await waitFor(() => expect(mockUpdateMyStaffProfile).toHaveBeenCalled());
+    const payload = mockUpdateMyStaffProfile.mock.calls[0][1];
     expect(payload).toEqual(expect.objectContaining({ patronymic: 'Петровна' }));
     // Untouched keys are omitted, not sent as their old values.
     expect(payload).not.toHaveProperty('birth_place');
@@ -268,8 +269,8 @@ describe('MyDataModal — submit + dirty guard', () => {
     });
     fireEvent.click(screen.getByTestId('mydata-submit'));
 
-    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
-    expect(mockUpdateMyProfile.mock.calls[0][0]).toEqual(
+    await waitFor(() => expect(mockUpdateMyStaffProfile).toHaveBeenCalled());
+    expect(mockUpdateMyStaffProfile.mock.calls[0][1]).toEqual(
       expect.objectContaining({ patronymic: null }),
     );
   });
@@ -281,13 +282,13 @@ describe('MyDataModal — submit + dirty guard', () => {
       target: { value: 'X' },
     });
     fireEvent.click(screen.getByTestId('mydata-submit'));
-    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
+    await waitFor(() => expect(mockUpdateMyStaffProfile).toHaveBeenCalled());
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
   });
 
   it('successful submit closes the modal and toasts «Данные сохранены»', async () => {
     const onClose = vi.fn();
-    renderModal(mockMyProfileMaster, { onClose });
+    renderModal(mockMyStaffProfileMaster, { onClose });
     await waitForForm();
     fireEvent.change(screen.getByTestId('mydata-patronymic'), {
       target: { value: 'X' },
@@ -298,20 +299,20 @@ describe('MyDataModal — submit + dirty guard', () => {
   });
 
   it('blocks required names: empty first_name → inline error, no PUT', async () => {
-    renderModal(createMockMyProfile({ first_name: '', last_name: 'Середа' }));
+    renderModal(createMockMyStaffProfile({ first_name: '', last_name: 'Середа' }));
     await waitForForm();
     fireEvent.change(screen.getByTestId('mydata-patronymic'), {
       target: { value: 'X' },
     });
     fireEvent.click(screen.getByTestId('mydata-submit'));
     expect(await screen.findByText('Обязательное поле')).toBeInTheDocument();
-    expect(mockUpdateMyProfile).not.toHaveBeenCalled();
+    expect(mockUpdateMyStaffProfile).not.toHaveBeenCalled();
   });
 
   it('dirty close asks for confirmation; cancel keeps the modal open', async () => {
     const onClose = vi.fn();
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    renderModal(mockMyProfileMaster, { onClose });
+    renderModal(mockMyStaffProfileMaster, { onClose });
     await waitForForm();
     fireEvent.change(screen.getByTestId('mydata-patronymic'), {
       target: { value: 'X' },
@@ -324,7 +325,7 @@ describe('MyDataModal — submit + dirty guard', () => {
   it('clean close does NOT ask for confirmation', async () => {
     const onClose = vi.fn();
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    renderModal(mockMyProfileMaster, { onClose });
+    renderModal(mockMyStaffProfileMaster, { onClose });
     await waitForForm();
     fireEvent.click(screen.getByTestId('modal-close-btn'));
     expect(confirmSpy).not.toHaveBeenCalled();
@@ -333,14 +334,14 @@ describe('MyDataModal — submit + dirty guard', () => {
 
   it('a failed PUT keeps the modal open and toasts the error', async () => {
     const onClose = vi.fn();
-    mockUpdateMyProfile.mockRejectedValue(new Error('boom'));
-    renderModal(mockMyProfileMaster, { onClose });
+    mockUpdateMyStaffProfile.mockRejectedValue(new Error('boom'));
+    renderModal(mockMyStaffProfileMaster, { onClose });
     await waitForForm();
     fireEvent.change(screen.getByTestId('mydata-patronymic'), {
       target: { value: 'X' },
     });
     fireEvent.click(screen.getByTestId('mydata-submit'));
-    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
+    await waitFor(() => expect(mockUpdateMyStaffProfile).toHaveBeenCalled());
     expect(onClose).not.toHaveBeenCalled();
     expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), 'error');
   });
@@ -348,7 +349,7 @@ describe('MyDataModal — submit + dirty guard', () => {
 
 describe('MyDataModal — no-card mode (S6)', () => {
   it('shows role + private fields, hides names and specialization', async () => {
-    renderModal(mockMyProfileNoCard);
+    renderModal(mockMyStaffProfileNoCard);
     await waitForForm();
     expect(screen.getByTestId('mydata-role')).toHaveValue('admin');
     expect(screen.getByTestId('mydata-patronymic')).toBeInTheDocument();
@@ -357,18 +358,18 @@ describe('MyDataModal — no-card mode (S6)', () => {
   });
 
   it('private fields save normally without a card', async () => {
-    renderModal(mockMyProfileNoCard);
+    renderModal(mockMyStaffProfileNoCard);
     await waitForForm();
     fireEvent.change(screen.getByTestId('mydata-patronymic'), {
       target: { value: 'Без Карточки' },
     });
     fireEvent.click(screen.getByTestId('mydata-submit'));
-    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
-    expect(mockUpdateMyProfile.mock.calls[0][0]).toEqual(
+    await waitFor(() => expect(mockUpdateMyStaffProfile).toHaveBeenCalled());
+    expect(mockUpdateMyStaffProfile.mock.calls[0][1]).toEqual(
       expect.objectContaining({ patronymic: 'Без Карточки' }),
     );
     // Card names never travel in no-card mode.
-    expect(mockUpdateMyProfile.mock.calls[0][0]).not.toHaveProperty('first_name');
+    expect(mockUpdateMyStaffProfile.mock.calls[0][1]).not.toHaveProperty('first_name');
   });
 });
 
@@ -406,7 +407,7 @@ describe('MyDataModal — GET error state (issue 1)', () => {
   it('the loading state is dismissible too (a hung GET cannot trap the user)', async () => {
     const onClose = vi.fn();
     // GET /my never resolves → the modal stays on the loading card.
-    mockGetMyProfile.mockReturnValue(new Promise(() => {}));
+    mockGetMyStaffProfile.mockReturnValue(new Promise(() => {}));
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -427,7 +428,7 @@ describe('MyDataModal — GET error state (issue 1)', () => {
 // calendar input gets aria-invalid like the other fields.
 describe('MyDataModal — field error a11y ids (issue 2)', () => {
   it('the inline name error span has an id matching the input aria-describedby', async () => {
-    renderModal(createMockMyProfile({ first_name: '', last_name: 'Середа' }));
+    renderModal(createMockMyStaffProfile({ first_name: '', last_name: 'Середа' }));
     await waitForForm();
     fireEvent.change(screen.getByTestId('mydata-patronymic'), {
       target: { value: 'X' },
@@ -457,7 +458,7 @@ describe('MyDataModal — field error a11y ids (issue 2)', () => {
 describe('MyDataModal — unified portrait busy state (issue 4)', () => {
   it('disables BOTH portrait buttons while an upload is in flight', async () => {
     let resolveUpload: (v: { avatar_url: string }) => void = () => {};
-    mockUploadPortrait.mockReturnValue(
+    mockUploadAvatar.mockReturnValue(
       new Promise<{ avatar_url: string }>((res) => {
         resolveUpload = res;
       }),
@@ -501,8 +502,8 @@ describe('MyDataModal — calendar date select (issue 6)', () => {
     );
 
     fireEvent.click(screen.getByTestId('mydata-submit'));
-    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
-    const payload = mockUpdateMyProfile.mock.calls[0][0];
+    await waitFor(() => expect(mockUpdateMyStaffProfile).toHaveBeenCalled());
+    const payload = mockUpdateMyStaffProfile.mock.calls[0][1];
     expect(payload).toHaveProperty('birth_date');
     expect(payload.birth_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
@@ -510,7 +511,7 @@ describe('MyDataModal — calendar date select (issue 6)', () => {
   it('selecting a date makes close dirty-guarded (confirm shown)', async () => {
     const onClose = vi.fn();
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    renderModal(mockMyProfileMaster, { onClose });
+    renderModal(mockMyStaffProfileMaster, { onClose });
     await waitForForm();
 
     fireEvent.click(screen.getByTestId('mydata-birth_date-toggle'));
@@ -525,7 +526,7 @@ describe('MyDataModal — calendar date select (issue 6)', () => {
   it('Escape with a dirty form runs the confirm guard', async () => {
     const onClose = vi.fn();
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    renderModal(mockMyProfileMaster, { onClose });
+    renderModal(mockMyStaffProfileMaster, { onClose });
     await waitForForm();
 
     fireEvent.change(screen.getByTestId('mydata-patronymic'), {

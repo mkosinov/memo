@@ -1,4 +1,5 @@
-"""Client booking scenario — ``POST /api/v1/my/records`` (#499 §5, Task 5).
+"""Client booking scenario — ``POST /api/v1/my/client/records`` (#499 §5,
+Task 5; the route moved under the client branch by ADR-015/#584).
 
 The session-based branch of the record-creation scenario (Corridor 2
 neighbor of ``usecases/records.create_record``). Two deliberate deltas

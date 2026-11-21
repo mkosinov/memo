@@ -4,7 +4,7 @@ The shared ``GET /api/v1/activities`` and ``GET /api/v1/activities/{id}``
 left ``PUBLIC_ROUTES`` (#493 photos precedent): anonymous requests get
 401, and so do CLIENT sessions — the client cookie
 ``memo_client_session`` is a different cookie NAME that the staff guard
-(``require_session`` → ``memo_session``) never reads (#499 spec §3).
+(``require_session`` → ``memo_staff_session``) never reads (#499 spec §3).
 Staff behaviour is UNCHANGED: admin sees all rows (private included),
 a master sees his own private rows in the list and point-get (GH #263
 scope regression pin). The anonymous schedule lives at
@@ -47,7 +47,8 @@ def _client_session_on_jar(anon_client) -> None:
 
     The ``_owner`` issuance pattern from test_my_records_api: a
     client-role user + a live sessions row. The cookie NAME is the whole
-    point of the probe — the staff guard reads ``memo_session`` and must
+    point of the probe — the staff guard reads ``memo_staff_session`` and
+    must
     stay blind to this one (401, not a resolved client principal).
     """
     user = insert_user(f"+7999{uuid.uuid4().hex[:7]}", None, role="client")

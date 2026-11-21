@@ -37,7 +37,7 @@ vi.mock('@memo/api-client', () => {
 // GH #267: Topbar now consumes useUserSettings — provider is auth-gated, so
 // mock the auth hook to report `authenticated`.
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: vi.fn(() => ({ status: 'authenticated', user: { id: 'u1' }, permissions: [], master: null, login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn() })),
+  useAuth: vi.fn(() => ({ status: 'authenticated', user: { id: 'u1' }, permissions: [], master: null, branch: 'master' as const, login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn() })),
 }));
 
 // Partial mock — real QueryClient/QueryClientProvider stay intact; only

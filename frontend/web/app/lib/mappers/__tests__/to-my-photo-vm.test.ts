@@ -1,7 +1,7 @@
 import { toMyPhotoCardView } from "../to-my-photo-vm";
 import { myPhotoItem } from "@/app/__tests__/fixtures/cabinet";
 
-describe("toMyPhotoCardView (GET /my/photos item → «Мои фото» card view)", () => {
+describe("toMyPhotoCardView (GET /my/client/photos item → «Мои фото» card view)", () => {
   it("maps a public photo: url verbatim, isPublic true, label «Опубликовано»", () => {
     const vm = toMyPhotoCardView(myPhotoItem());
 

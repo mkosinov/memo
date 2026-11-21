@@ -109,7 +109,7 @@ def _ladder(user_id: str) -> dict:
 def actor() -> Iterator[dict]:
     """A real users row + the staged audit actor (the §4.1 author slot)."""
     admin = insert_user("+79990007770", "x", role="admin")
-    token = audit.set_actor(user_id=admin["id"], role="admin")
+    token = audit.set_actor(user_id=admin["id"], roles=["admin"])
     yield admin
     audit.reset_actor(token)
 

@@ -90,7 +90,8 @@ export default defineConfig({
 
   use: {
     // GH #247 T14: pages and the API must be SAME-SITE for the HttpOnly
-    // SameSite=Lax memo_session cookie to flow (site = scheme+host, ports
+    // SameSite=Lax memo_staff_session cookie (#584 §2.6 rename) to flow
+    // (site = scheme+host, ports
     // ignored). BACKEND_URL is 127.0.0.1, so the frontend base must be
     // 127.0.0.1 too — localhost would make every API fetch cross-site
     // (cookie silently dropped) and trip the backend CSRF line.

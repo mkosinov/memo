@@ -108,7 +108,9 @@ async function setArchivedToggle(
   if ((await toggle.isChecked()) === checked) return;
   const patchPromise = opts.waitForPersist
     ? page.waitForResponse(
-        (r) => r.url().includes('/api/v1/user-settings') && r.request().method() === 'PATCH',
+        // #584 §4.4: the settings PATCH rides the ADMIN branch (this
+        // spec's default storageState session).
+        (r) => r.url().includes('/api/v1/my/admin/settings') && r.request().method() === 'PATCH',
         { timeout: 10_000 },
       )
     : null;

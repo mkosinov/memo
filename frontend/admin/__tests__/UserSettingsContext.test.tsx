@@ -35,6 +35,7 @@ vi.mock('@/contexts/AuthContext', () => ({
 import { getUserSettings, patchUserSettings } from '@memo/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserSettingsProvider, useUserSettings } from '../contexts/UserSettingsContext';
+import type { StaffBranch } from '@memo/api-client';
 
 const mockGetUserSettings = vi.mocked(getUserSettings);
 const mockPatchUserSettings = vi.mocked(patchUserSettings);
@@ -48,12 +49,16 @@ const authUser = {
   email: null,
 };
 
-function mockAuthState(status: 'loading' | 'authenticated' | 'guest') {
+function mockAuthState(
+  status: 'loading' | 'authenticated' | 'guest',
+  branch: StaffBranch | null = status === 'authenticated' ? 'admin' : null,
+) {
   return {
     user: status === 'authenticated' ? { ...authUser } : null,
     permissions: ['*'],
     master: null,
     status,
+    branch,
     login: vi.fn(),
     logout: vi.fn(),
     can: vi.fn(() => true),
@@ -131,17 +136,28 @@ describe('UserSettingsContext auth gating (GH #247 §4.6)', () => {
     expect(screen.getByTestId('ready')).toHaveTextContent('false');
   });
 
-  it('loads settings once auth resolves to "authenticated"', async () => {
+  it('loads settings once auth resolves to "authenticated" — via the whoami branch', async () => {
     mockUseAuth.mockReturnValue(mockAuthState('authenticated'));
     mockGetUserSettings.mockResolvedValue(remoteSettings);
     renderConsumer();
     await waitFor(() => {
       expect(mockGetUserSettings).toHaveBeenCalledTimes(1);
     });
+    // #584 §5: the staff settings instance mounts under /my/{branch}/settings.
+    expect(mockGetUserSettings).toHaveBeenCalledWith('admin');
     await waitFor(() => {
       expect(screen.getByTestId('ready')).toHaveTextContent('true');
     });
     expect(screen.getByTestId('col-masters')).toHaveTextContent('m1,m2');
+  });
+
+  it('rides the master branch when whoami computed it', async () => {
+    mockUseAuth.mockReturnValue(mockAuthState('authenticated', 'master'));
+    mockGetUserSettings.mockResolvedValue(remoteSettings);
+    renderConsumer();
+    await waitFor(() => {
+      expect(mockGetUserSettings).toHaveBeenCalledWith('master');
+    });
   });
 });
 
@@ -345,6 +361,7 @@ describe('UserSettingsContext archived visibility (GH #267)', () => {
     fireEvent.click(screen.getByTestId('toggle-archived-masters'));
     await waitFor(() => {
       expect(mockPatchUserSettings).toHaveBeenCalledWith(
+        'admin',
         expect.objectContaining({ show_archived_masters: false }),
       );
     });
@@ -353,6 +370,7 @@ describe('UserSettingsContext archived visibility (GH #267)', () => {
     fireEvent.click(screen.getByTestId('toggle-archived-locations'));
     await waitFor(() => {
       expect(mockPatchUserSettings).toHaveBeenCalledWith(
+        'admin',
         expect.objectContaining({ show_archived_locations: true }),
       );
     });

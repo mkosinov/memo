@@ -65,7 +65,7 @@ function saveToStorage(settings: UserSettings) {
 const UserSettingsContext = createContext<UserSettingsContextType | null>(null);
 
 export function UserSettingsProvider({ children }: { children: React.ReactNode }) {
-  const { status, user } = useAuth();
+  const { status, user, branch } = useAuth();
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const mountedRef = useRef(true);
@@ -73,9 +73,14 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     // GH #247 §4.6: settings load only after auth resolves to
     // `authenticated` — the session cookie must exist before the API call,
-    // otherwise every page load fires a doomed 401 for guests.
-    if (status !== 'authenticated') return;
+    // otherwise every page load fires a doomed 401 for guests. #584 §5: the
+    // branch must be resolved too — the staff settings instance lives under
+    // /my/{branch}/settings (same account, same rows; the branch is the
+    // audience address).
+    if (status !== 'authenticated' || branch === null) return;
     mountedRef.current = true;
+    // Capture the narrowed branch for the hoisted async closure below.
+    const targetBranch = branch;
 
     async function load() {
       // 1. Try localStorage first for instant render
@@ -88,7 +93,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
       // 2. Sync from backend (when API is available)
       try {
         const { getUserSettings } = await import('@memo/api-client');
-        const remote = await getUserSettings();
+        const remote = await getUserSettings(targetBranch);
         const remoteSettings: UserSettings = {
           theme: remote.theme as 'light' | 'dark',
           language: remote.language as 'ru' | 'en',
@@ -119,14 +124,18 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
 
     load();
     return () => { mountedRef.current = false; };
-  }, [status, user?.id]);
+  }, [status, user?.id, branch]);
 
   const updateSettings = useCallback((partial: Partial<UserSettings>) => {
     setSettings((prev) => {
       const next = { ...prev, ...partial };
       saveToStorage(next);
-      // Optimistic backend update (fire-and-forget)
+      // Optimistic backend update (fire-and-forget). #584 §5: rides the
+      // computed branch — captured per render via a ref-free closure over
+      // the current branch (updates only fire from authenticated screens).
+      const targetBranch = branch;
       import('@memo/api-client').then(({ patchUserSettings }) => {
+        if (targetBranch === null) return;
         const apiPartial: Record<string, unknown> = {};
         if (partial.theme !== undefined) apiPartial.theme = partial.theme;
         if (partial.language !== undefined) apiPartial.language = partial.language;
@@ -135,11 +144,11 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
         // GH #267: archived-visibility toggles.
         if (partial.showArchivedMasters !== undefined) apiPartial.show_archived_masters = partial.showArchivedMasters;
         if (partial.showArchivedLocations !== undefined) apiPartial.show_archived_locations = partial.showArchivedLocations;
-        patchUserSettings(apiPartial).catch(() => {});
+        patchUserSettings(targetBranch, apiPartial).catch(() => {});
       }).catch(() => {});
       return next;
     });
-  }, []);
+  }, [branch]);
 
   const setColumnOrder = useCallback((mode: 'masters' | 'locations', order: string[]) => {
     const key = mode === 'masters' ? 'columnOrderMasters' : 'columnOrderLocations';

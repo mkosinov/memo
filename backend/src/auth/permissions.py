@@ -8,7 +8,8 @@ server-side expansion (G1b simplification).
 
 ``require_session`` / ``require_permission`` — the FastAPI dependencies T7
 staples onto every guarded router (spec §3.5): the former resolves the
-``memo_session`` cookie via ``AuthService`` and yields the ``AuthedUser``,
+``memo_staff_session`` cookie via ``AuthService`` and yields the
+``AuthedUser``,
 the latter layers the permission matcher on top. ``get_auth_service`` is
 imported lazily inside ``require_session`` — ``service.py`` imports this
 module, so a module-level import would be circular.
@@ -23,6 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException
+from sqlalchemy import select
 
 # ``Request`` MUST stay a runtime import (not TYPE_CHECKING): FastAPI
 # resolves dependency signatures via get_type_hints at registration time.
@@ -32,6 +34,8 @@ from src.core.config import settings
 from src.db import db_manager
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import UserRole
+from src.models.master import Master
+from src.models.user import User
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -76,7 +80,7 @@ class AuthedUser:
     phone: str
     role: str
     # GH #266 D10: internal principal renamed master_id → staff_id (the
-    # card FK); the /auth/me response shape is UNCHANGED (wire keeps
+    # card FK); the login response shape is UNCHANGED (wire keeps
     # master_id until the frontend migrates).
     staff_id: str | None
     permissions: frozenset[str]
@@ -135,13 +139,16 @@ async def verify_origin(request: Request) -> None:
 
 # ─── Session dependencies (T5) ─────────────────────────────────────────────────
 
-#: Cookie name carrying the opaque session token (spec §2.2).
-SESSION_COOKIE = "memo_session"
+#: Cookie name carrying the opaque session token (spec §2.2). RENAMED
+#: ``memo_session`` → ``memo_staff_session`` (#584 ADR-015, spec §2.6):
+#: the cookie pair mirrors the audiences; no prod → no transition.
+SESSION_COOKIE = "memo_staff_session"
 
 #: #499 (spec §4.3): client sessions ride the SAME session rows but a
 #: SEPARATE cookie name — a client and a staff session coexist in one
 #: browser without clobbering each other (site and admin share the API
-#: origin). Same attributes as ``memo_session``; only the name differs.
+#: origin). Same attributes as ``memo_staff_session``; only the name
+#: differs.
 CLIENT_SESSION_COOKIE = "memo_client_session"
 
 
@@ -167,23 +174,15 @@ def _forbidden() -> HTTPException:
     )
 
 
-async def resolve_authed(token: str | None) -> AuthedUser | None:
-    """Resolve a session token into an ``AuthedUser``, or ``None``.
+async def resolve_authed_pure(token: str | None) -> AuthedUser | None:
+    """Resolve a session token into an ``AuthedUser`` — no side effects.
 
-    The shared resolution core for ``require_session`` (strict: raises
-    401 on miss) and, through it, ``get_optional_scope`` (#600: the
-    scope seam rides the same ``require_session`` dependency via
-    FastAPI's per-request cache — one resolve pair per request, the
-    N+1 guard on the activities list keeps it honest). One
-    session-cookie lookup shape, no drift between the consumers.
-
-    GH #344 (spec §4.1): a successful resolve ALSO stages the request's
-    audit actor (``user_id`` + ``role`` contextvar) — both guard paths
-    flow through here, so the journal author is set on every guarded
-    route with zero extra DB hits. The author comes only from the
-    server-side session, never from request data. No author → the
-    ``@transactional`` audit insertion is skipped (seeds/CLI/anonymous
-    are not journaled, spec §12).
+    #584 §6: the single resolution core (sliding window, lazy expiry,
+    archived-account refusal) — session-cookie lookup only, NO audit
+    staging. Resolve and journaling are separate seams: the staging
+    wrapper below and the combined whoami guard both build on this
+    core, so there is exactly one resolution shape and no drift
+    between the consumers.
     """
     if token is None:
         return None
@@ -192,27 +191,50 @@ async def resolve_authed(token: str | None) -> AuthedUser | None:
     from src.auth.service import get_auth_service
 
     async with db_manager.async_session() as db_session:
-        authed = await get_auth_service().resolve(db_session, token)
+        return await get_auth_service().resolve(db_session, token)
+
+
+async def resolve_authed(token: str | None) -> AuthedUser | None:
+    """Resolve a session token into an ``AuthedUser`` AND stage the actor.
+
+    The shared resolution for ``require_session`` (strict: raises 401 on
+    miss) and, through it, ``get_optional_scope`` (#600: the scope seam
+    rides the same ``require_session`` dependency via FastAPI's
+    per-request cache — one resolve pair per request, the N+1 guard on
+    the activities list keeps it honest). The resolve itself is
+    :func:`resolve_authed_pure` above — this wrapper only adds the
+    journal seam, so the two can never drift apart.
+
+    GH #344 (spec §4.1): a successful resolve ALSO stages the request's
+    audit actor (``user_id`` + ``roles`` contextvar; #584 widened the
+    actor record to the role LIST — this classic single-role path stages
+    a 1-tuple) — both guard paths flow through here, so the journal
+    author is set on every guarded route with zero extra DB hits. The
+    author comes only from the server-side session, never from request
+    data. No author → the ``@transactional`` audit insertion is skipped
+    (seeds/CLI/anonymous are not journaled, spec §12).
+    """
+    authed = await resolve_authed_pure(token)
     if authed is not None:
         # LAZY import — cycle hazard: a top-level import would form
-        # audit → scope → permissions → audit (mask_phone precedes the
-        # actor here; see the WARNING in src/events/audit.py).
+        # audit → scope → permissions → audit (see the WARNING in
+        # src/events/audit.py).
         from src.events.audit import set_actor
 
-        set_actor(user_id=authed.id, role=authed.role)
+        set_actor(user_id=authed.id, roles=[authed.role])
     return authed
 
 
 async def require_session(request: Request) -> AuthedUser:
-    """Resolve the ``memo_session`` cookie into an ``AuthedUser``.
+    """Resolve the ``memo_staff_session`` cookie into an ``AuthedUser``.
 
     401 ``AUTH_UNAUTHORIZED`` for a missing cookie, unknown token, or an
     expired/archived session — the frontend treats all three as "no
     session" and redirects to login (spec §5).
 
-    #499 (spec §3): deliberately UNCHANGED — reads only ``memo_session``
-    and checks no role; client-session separation lives in
-    ``require_client_session`` below.
+    #499 (spec §3): deliberately UNCHANGED — reads only
+    ``memo_staff_session`` and checks no role; client-session separation
+    lives in ``require_client_session`` below.
     """
     authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
     if authed is None:
@@ -225,15 +247,187 @@ async def require_client_session(request: Request) -> AuthedUser:
 
     #499 (spec §3/§4.3): same session rows, same resolve core (sliding
     window, lazy expiry, archived-account refusal) — but ONLY the client
-    cookie name is read (a staff ``memo_session`` is invisible here) and
-    the resolved role must be ``client`` (a staff token copied into the
-    client cookie name resolves, then fails the role barrier). Both
-    cross-presentation shapes are the SAME 401 ``AUTH_UNAUTHORIZED`` as
-    no session at all. The staff resolver above stays untouched.
+    cookie name is read (a staff ``memo_staff_session`` is invisible
+    here) and the resolved role must be ``client`` (a staff token copied
+    into the client cookie name resolves, then fails the role barrier).
+    Both cross-presentation shapes are the SAME 401
+    ``AUTH_UNAUTHORIZED`` as no session at all. The staff resolver above
+    stays untouched.
     """
     authed = await resolve_authed(request.cookies.get(CLIENT_SESSION_COOKIE))
     if authed is None or authed.role != UserRole.CLIENT.value:
         raise _unauthorized()
+    return authed
+
+
+# ─── #584 (spec §4.1/§6) — combined whoami guard ───────────────────────────────
+
+
+async def _resolved_staff_roles(staff: AuthedUser) -> tuple[str, ...]:
+    """The staff-side role composition for a RESOLVED staff principal (§4.1).
+
+    * ``admin`` — the account role is admin;
+    * ``master`` — the account role is master OR the account has a
+      master section (``masters.staff_id`` via ``users.staff_id``); both
+      entries may appear (an admin with a master section).
+
+    The audience filter is upstream: only a resolved STAFF cookie
+    reaches here. A client account under the staff cookie contributes
+    nothing — its role matches no staff entry and it carries no staff
+    card, hence no master section.
+    """
+    roles: list[str] = []
+    if staff.role == UserRole.ADMIN.value:
+        roles.append(UserRole.ADMIN.value)
+    if staff.role == UserRole.MASTER.value or await _has_master_section(staff):
+        roles.append(UserRole.MASTER.value)
+    return tuple(roles)
+
+
+async def _has_master_section(staff: AuthedUser) -> bool:
+    """Does the account's staff card carry a ``masters`` extension row?"""
+    if staff.staff_id is None:
+        return False
+    async with db_manager.async_session() as db_session:
+        section = (
+            await db_session.execute(
+                select(Master.staff_id).where(Master.staff_id == staff.staff_id)
+            )
+        ).scalar_one_or_none()
+    return section is not None
+
+
+async def _account_email(user_id: str) -> str | None:
+    """The primary account's ``email`` column (client accounts carry none)."""
+    async with db_manager.async_session() as db_session:
+        email = (
+            await db_session.execute(
+                select(User.email).where(User.id == user_id)
+            )
+        ).scalar_one_or_none()
+    return email
+
+
+@dataclass(frozen=True)
+class WhoamiIdentities:
+    """What the combined whoami guard resolved (#584, spec §4.1).
+
+    ``roles`` is the full audience-filtered list, staff-side entries
+    first (the staff-first order is the actor's primary-role invariant);
+    ``primary`` is the staff account when its cookie resolved, else the
+    client account — the single audit-actor and response identity.
+    """
+
+    staff: AuthedUser | None
+    client: AuthedUser | None
+    primary: AuthedUser
+    roles: tuple[str, ...]
+    email: str | None
+
+
+async def require_any_session(request: Request) -> WhoamiIdentities:
+    """The combined «кто я» guard (#584, spec §4.1/§6) — whoami ONLY.
+
+    Two PURE resolves (``resolve_authed_pure`` — no actor staging inside
+    the resolve), each reading only its own cookie name; the role list
+    is composed with symmetric audience filters (a role enters the list
+    only via a valid cookie of its own audience — cross-presented tokens
+    resolve but contribute nothing). Empty list → the shared 401.
+
+    Then exactly ONE actor record (decision 2026-11-13): the primary
+    account — the staff one when its cookie resolved, else the client
+    one — carrying the FULL resolved role list. The losing probe never
+    creates its own record.
+    """
+    staff = await resolve_authed_pure(request.cookies.get(SESSION_COOKIE))
+    client = await resolve_authed_pure(
+        request.cookies.get(CLIENT_SESSION_COOKIE)
+    )
+
+    staff_side = await _resolved_staff_roles(staff) if staff is not None else ()
+    client_side = (
+        (UserRole.CLIENT.value,)
+        if client is not None and client.role == UserRole.CLIENT.value
+        else ()
+    )
+    roles = staff_side + client_side
+    if not roles:
+        raise _unauthorized()
+
+    # Primary account: staff-first (spec §4.1 — the staff account when
+    # its cookie resolved, else the client one).
+    primary = staff if staff is not None else client
+    assert primary is not None  # a non-empty role list implies a resolve
+
+    # LAZY import — same cycle hazard as in resolve_authed above.
+    from src.events.audit import set_actor
+
+    set_actor(user_id=primary.id, roles=roles)
+    return WhoamiIdentities(
+        staff=staff,
+        client=client,
+        primary=primary,
+        roles=roles,
+        email=await _account_email(primary.id),
+    )
+
+
+# ─── #584 (spec §4.3) — staff branch guards /my/master + /my/admin ─────────────
+
+
+async def _require_staff_session(request: Request) -> AuthedUser:
+    """Staff-branch session core: resolve the STAFF cookie into a staff
+    principal.
+
+    Mirrors :func:`require_client_session` (the twin barrier on the other
+    audience): only ``SESSION_COOKIE`` is read AND the resolved role must
+    be a staff role — a client token cross-presented under the staff
+    cookie name resolves, then fails the role barrier with the SAME 401
+    ``AUTH_UNAUTHORIZED`` as no cookie at all (spec §4.3: «нет валидной
+    куки сотрудника → 401 единым конвертом»).
+    """
+    authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
+    if authed is None or authed.role not in (
+        UserRole.ADMIN.value,
+        UserRole.MASTER.value,
+    ):
+        raise _unauthorized()
+    return authed
+
+
+async def require_admin_branch(
+    authed: AuthedUser = Depends(_require_staff_session),
+) -> AuthedUser:
+    """/my/admin admission: role ``admin`` — exactly the whoami list.
+
+    Spec §4.3: branch admission is IN EXACTLY the whoami composition
+    («допуск ветки — в точности состав списка „кто я"») — ``"admin"`` is
+    in the staff-side list iff the account role is admin (the audience
+    filter already passed in the core above), so the direct role check
+    IS the list membership. Valid staff cookie, wrong branch → 403.
+    """
+    if authed.role != UserRole.ADMIN.value:
+        raise _forbidden()
+    return authed
+
+
+async def require_master_branch(
+    authed: AuthedUser = Depends(_require_staff_session),
+) -> AuthedUser:
+    """/my/master admission: role ``master`` OR a master section.
+
+    The whoami composition via the SAME :func:`_has_master_section`
+    probe (existence, regardless of ``is_active`` — a distribution-off
+    section still qualifies): ``"master"`` enters the whoami list iff
+    the role is master or the section exists. The section-less
+    role-master keeps the branch; a non-master without a section gets
+    403 — including a pure admin («роль master, секции нет» and
+    «админ без мастер-секции» both pinned by spec §9).
+    """
+    if authed.role != UserRole.MASTER.value and not await _has_master_section(
+        authed
+    ):
+        raise _forbidden()
     return authed
 
 

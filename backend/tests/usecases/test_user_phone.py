@@ -84,7 +84,7 @@ def actor() -> Iterator[dict]:
     from src.events import audit
 
     admin = insert_user("+79990007771", "x", role="admin")
-    token = audit.set_actor(user_id=admin["id"], role="admin")
+    token = audit.set_actor(user_id=admin["id"], roles=["admin"])
     yield admin
     audit.reset_actor(token)
 

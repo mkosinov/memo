@@ -36,13 +36,16 @@ UserSettings stores per-user UI preferences: theme, language, column ordering fo
 - Schedule filter popup (Topbar) renders the two `show_archived_*` checkboxes as dropdown footers and writes them via `updateSettings` (GH #267); missing keys fall back to the defaults above (first frame incl.)
 
 ## API Endpoints
+
+#584 (ADR-015, клоз 3): роутер `/user-settings` переехал под ветки; корневого `/my/settings` **нет**, прежние `/api/v1/user-settings*` → 404. Стафф-экземпляр смонтирован под `/my/master/settings` и `/my/admin/settings` — та же учётка, те же строки (ветка адресует аудиторию, не другие данные); клиентский — `/my/client/settings` под гардом `require_client_session` (строки клиентских учёток создаются при рождении учётки, #499; потребителя в интерфейсе пока нет — готовая поверхность).
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/user-settings | Get the session user's settings; get-or-create — creates defaults if missing (`no-store`) |
-| POST | /api/v1/user-settings | Create (user taken from the session; body `user_id` ignored) |
-| PUT | /api/v1/user-settings | Partial update (session user's row, own-only) |
-| PATCH | /api/v1/user-settings | Partial update (session user's row, own-only) |
-| DELETE | /api/v1/user-settings/{settings_id} | Hard delete by primary key (own row only, else 403) — reset to defaults, recreated on next read; единый флоу #324 (лист): голый → 422, тело `{expected:{}}`, `?dry_run=true` → 204 |
+| GET | /api/v1/my/{master,admin,client}/settings | Get the session user's settings; get-or-create — creates defaults if missing (`no-store`) |
+| POST | /api/v1/my/{master,admin,client}/settings | Create (user taken from the session; body `user_id` ignored) |
+| PUT | /api/v1/my/{master,admin,client}/settings | Update (session user's row, own-only) |
+| PATCH | /api/v1/my/{master,admin,client}/settings | Partial update (session user's row, own-only) |
+| DELETE | /api/v1/my/{master,admin,client}/settings/{settings_id} | Hard delete by primary key (own row only, else 403) — reset to defaults, recreated on next read; единый флоу #324 (лист): голый → 422, тело `{expected:{}}`, `?dry_run=true` → 204 |
 
 ## Relationships
 - UserSettings → belongs to User (FK + UNIQUE on `user_id`, enforced at the DB level)

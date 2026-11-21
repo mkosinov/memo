@@ -38,9 +38,11 @@ export function UserMenu({ collapsed }: UserMenuProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // Plate content per spec rev 3 (D9): first + last name from the /auth/me
-  // snapshot (T3 supplies archived-card names too); «Аноним» only when the
-  // card carries no name — in practice, when there is no card at all.
+  // Plate content per spec rev 3 (D9): first + last name from the
+  // branch-profile snapshot (#584: the whoami chain
+  // getMyWhoami() → getMyStaffProfile(branch) supplies archived-card names
+  // too); «Аноним» only when the card carries no name — in practice, when
+  // there is no card at all.
   const fullName = master ? `${master.first_name} ${master.last_name}`.trim() : '';
   const displayName = fullName || 'Аноним';
   const avatarUrl = master?.avatar_url ?? null;

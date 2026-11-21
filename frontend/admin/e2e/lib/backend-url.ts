@@ -7,7 +7,8 @@
  * operator never chose — and could piggyback a foreign shard stack running
  * there. On top of that, .env.test's NEXT_PUBLIC_API_URL=localhost baked a
  * cross-site API origin into the browser bundle while the frontend baseURL
- * is 127.0.0.1: the SameSite=Lax memo_session cookie never reaches the API
+ * is 127.0.0.1: the SameSite=Lax memo_staff_session cookie (#584 §2.6
+ * rename) never reaches the API
  * (site = scheme + host; localhost ≠ 127.0.0.1 — GH #247 T14).
  *
  * Contract (same discipline as db-path.ts, GH #209/#336 — loud error over

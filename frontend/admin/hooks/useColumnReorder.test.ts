@@ -8,9 +8,14 @@ const mockReorderLocations = vi.fn().mockResolvedValue(undefined);
 // GH #266 Gap C: `reorderMasters` was deleted from api-client (D8 — master
 // column order is no longer a `/masters/reorder` write). Master-column order
 // now persists as a user setting (`column_order_staff`, migration step 7).
+// #584 §5: the settings write rides the whoami-computed branch.
 vi.mock('@memo/api-client', () => ({
   patchUserSettings: (...args: unknown[]) => mockPatchUserSettings(...args),
   reorderLocations: (...args: unknown[]) => mockReorderLocations(...args),
+}));
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ branch: 'master' }),
 }));
 
 describe('useColumnReorder', () => {
@@ -84,8 +89,8 @@ describe('useColumnReorder', () => {
       await new Promise((r) => setTimeout(r, 10));
     });
     // GH #266 Gap C: master-column order is a user setting now, not a
-    // `/masters/reorder` write (deleted in D8).
-    expect(mockPatchUserSettings).toHaveBeenCalledWith({
+    // `/masters/reorder` write (deleted in D8). #584: via the branch.
+    expect(mockPatchUserSettings).toHaveBeenCalledWith('master', {
       column_order_staff: ['m2', 'm1', 'm3'],
     });
   });

@@ -337,7 +337,8 @@ def _my_booking_exception(started: datetime, now: datetime) -> HTTPException:
 
 
 def booking_spam_gate(account_id: str, visits: int) -> HTTPException | None:
-    """Pre-work gate for ``POST /api/v1/my/records`` (#499 §5).
+    """Pre-work gate for ``POST /api/v1/my/client/records`` (#499 §5,
+    ADR-015/#584 path).
 
     Rejects (429 ``AUTH_LOCKED_OUT`` + Retry-After) when the account is
     at the 20-record ceiling or when THIS booking's visits would push the

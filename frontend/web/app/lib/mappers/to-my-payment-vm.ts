@@ -6,7 +6,8 @@ import {
 } from "@/app/lib/model/domain/payment-method";
 import { formatDate, formatPrice } from "@/app/lib/mappers/format";
 
-/** Contract payment (GET /my/payments items[]) → «Мои платежи» row view
+/** Contract payment (GET /my/client/payments items[], #584 branch path) →
+ * «Мои платежи» row view
  * (#513): amount render-ready, method translated to its Russian label
  * (null → «Способ не указан»), the payment's own date, and the lesson
  * context from the always-present record (service title + activity

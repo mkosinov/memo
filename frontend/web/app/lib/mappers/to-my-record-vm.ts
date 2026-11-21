@@ -25,7 +25,8 @@ function toVisitRowView(raw: MyVisitItem): MyVisitRowView {
   };
 }
 
-/** Contract record (GET /my/records items[]) → «Мои записи» card view
+/** Contract record (GET /my/client/records items[], #584 branch path) →
+ * «Мои записи» card view
  * (#513): date/time render-ready, service title as-is, own comment
  * passthrough (null hides the block in the UI), visits in server order. */
 export function toMyRecordCardView(raw: MyRecordItem): MyRecordCardView {

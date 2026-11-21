@@ -12,7 +12,8 @@
 //    only when has_master=true; the admin owns it in the staff card (D4) —
 //    it is NEVER part of the PUT payload;
 //  - portrait block (preview + «Загрузить фото» + «Удалить») — only with a
-//    card; upload → POST /my/portrait, delete → PUT {avatar_url: null}; both
+//    card; upload → POST /my/{branch}/avatar (#584 rename), delete → PUT
+//    {avatar_url: null}; both
 //    call AuthContext.refresh() so the sidebar plate updates immediately
 //    (the plate reads the snapshot STATE, not react-query — pinned T7);
 //  - «Паспорт» section — private fields + the disabled placeholder row
@@ -27,7 +28,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { CalendarPopover } from '@/app/components/shared/CalendarPopover';
-import { useMyProfile, useUpdateMyProfile, useUploadPortrait } from '@/hooks/useMyProfile';
+import { useMyProfile, useUpdateMyProfile, useUploadAvatar } from '@/hooks/useMyProfile';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
 import { parseApiError } from '@/app/lib/api/parseApiError';
@@ -114,7 +115,7 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
   const { refresh } = useAuth();
   const { showToast } = useUI();
   const updateProfile = useUpdateMyProfile();
-  const uploadPortrait = useUploadPortrait();
+  const uploadAvatar = useUploadAvatar();
 
   const [form, setForm] = useState<FormState>(() => initialForm(profile));
   const initial = useRef<FormState>(form).current;
@@ -208,14 +209,14 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
       e.target.value = ''; // allow re-picking the same file after an error
       if (!file) return;
       try {
-        const res = await uploadPortrait.mutateAsync(file);
+        const res = await uploadAvatar.mutateAsync(file);
         setAvatarUrl(res.avatar_url);
         await refresh(); // the plate avatar updates immediately (pinned T7)
       } catch (err) {
         showToast(parseApiError(err).message, 'error');
       }
     },
-    [uploadPortrait, refresh, showToast],
+    [uploadAvatar, refresh, showToast],
   );
 
   const handleDeleteAvatar = useCallback(async () => {
@@ -230,9 +231,9 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
 
   const busy = updateProfile.isPending;
   // Fix-round issue 4: BOTH portrait buttons disable while ANY portrait
-  // mutation is in flight — the upload (uploadPortrait) and the delete
+  // mutation is in flight — the upload (uploadAvatar) and the delete
   // (updateProfile with avatar_url:null) share one busy flag.
-  const portraitBusy = busy || uploadPortrait.isPending;
+  const portraitBusy = busy || uploadAvatar.isPending;
 
   const renderField = (field: MyDataFieldConfig) => {
     const testId = `mydata-${field.key}`;
@@ -363,7 +364,7 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
                   className="px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50"
                   style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
                 >
-                  {uploadPortrait.isPending ? 'Загрузка...' : 'Загрузить фото'}
+                  {uploadAvatar.isPending ? 'Загрузка...' : 'Загрузить фото'}
                 </button>
                 {avatarUrl && (
                   <button

@@ -40,6 +40,15 @@ function isAuthPath(path: string): boolean {
   return path.startsWith('/api/v1/auth/');
 }
 
+// The whoami exception (#584 spec §5) — POINT-SIZED: GET + the EXACT path
+// /api/v1/my. A 401 there is the guest bootstrap probe (getMyWhoami
+// resolves it to null), part of normal flow — never a redirect trigger.
+// Deliberately NOT a /my prefix: an expired session on the branch paths
+// (/my/master, /my/admin, /my/client/*) must keep redirecting to login.
+function isWhoamiProbe(path: string, method: string | undefined): boolean {
+  return path === '/api/v1/my' && (method === undefined || method === 'GET');
+}
+
 // Request ceilings (GH #330): JSON round-trips get 30s; FormData uploads
 // (GH #262 portraits) get 120s for slow mobile uplinks. Shared by admin and
 // web — the single client is the single point of enforcement.
@@ -60,8 +69,9 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
-    // Cookie sessions (GH #247 spec §4.1): the memo_session cookie rides along
-    // on every request so the backend can resolve the session user.
+    // Cookie sessions (GH #247 spec §4.1): the session cookies
+    // (memo_staff_session / memo_client_session, #584) ride along on every
+    // request so the backend can resolve the session user.
     credentials: 'include',
     // AFTER the spread on purpose: a caller's explicit signal must never be
     // overridden by the timeout ceiling (GH #330).
@@ -109,10 +119,16 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
     }
 
     // Session expiry mid-work (GH #247 spec §4.1): hand the registered handler
-    // a chance to react (the admin redirects to /login) — /auth/* 401s are
-    // part of normal flow and never trigger it. Handler failures are ignored:
-    // the original 401 ApiError must always be the one the caller sees.
-    if (res.status === 401 && unauthorizedHandler !== null && !isAuthPath(path)) {
+    // a chance to react (the admin redirects to /login) — /auth/* 401s and
+    // the GET /api/v1/my whoami probe (#584 spec §5) are part of normal flow
+    // and never trigger it. Handler failures are ignored: the original 401
+    // ApiError must always be the one the caller sees.
+    if (
+      res.status === 401 &&
+      unauthorizedHandler !== null &&
+      !isAuthPath(path) &&
+      !isWhoamiProbe(path, method)
+    ) {
       try {
         unauthorizedHandler();
       } catch {

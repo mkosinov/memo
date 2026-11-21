@@ -13,7 +13,8 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "alembic>=1.18.4",
     "pwdlib[argon2]>=0.3.1",
-    # GH #262 Task 2 — multipart/form-data parsing for POST /my/portrait
+    # GH #262 Task 2 — multipart/form-data parsing for the avatar upload
+    # (POST /my/{master,admin}/avatar, #584; former POST /my/portrait)
     "python-multipart>=0.0.20",
     # GH #482 — template rendering for notification messages (spec §3.5).
     # Floor 3.1.6: CVE-2025-27516 (sandbox escape via |attr, fixed in 3.1.6).

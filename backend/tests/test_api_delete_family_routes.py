@@ -205,7 +205,7 @@ class TestPaymentDeleteContract:
 
 
 class TestUserSettingsDeleteContract:
-    """DELETE /api/v1/user-settings/{id} — leaf; probe-read + own-only 403
+    """DELETE /api/v1/my/admin/settings/{id} — leaf; probe-read + own-only 403
     (spec §4.2) before the fork."""
 
     def _make(self, api_client) -> dict:
@@ -216,37 +216,37 @@ class TestUserSettingsDeleteContract:
         (the ``test_api_user_settings.py`` §5.5 anomaly pattern), then
         POST is a clean 201 again.
         """
-        me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+        me = api_client.get("/api/v1/my").json()["id"]
         delete_settings_row(me)
-        resp = api_client.post("/api/v1/user-settings", json={"user_id": me})
+        resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
         assert resp.status_code == 201, resp.text
         return resp.json()
 
     def test_form_422s(self, api_client) -> None:
         settings = self._make(api_client)
-        _assert_form_422s(api_client, f"/api/v1/user-settings/{settings['id']}")
+        _assert_form_422s(api_client, f"/api/v1/my/admin/settings/{settings['id']}")
 
     def test_dry_run_204_row_alive(self, api_client) -> None:
         settings = self._make(api_client)
-        resp = _dry_run(api_client, f"/api/v1/user-settings/{settings['id']}")
+        resp = _dry_run(api_client, f"/api/v1/my/admin/settings/{settings['id']}")
         assert resp.status_code == 204
-        assert api_client.get("/api/v1/user-settings").status_code == 200
+        assert api_client.get("/api/v1/my/admin/settings").status_code == 200
 
     def test_dry_run_unknown_id_404(self, api_client) -> None:
-        resp = _dry_run(api_client, f"/api/v1/user-settings/{_MISSING_ID}")
+        resp = _dry_run(api_client, f"/api/v1/my/admin/settings/{_MISSING_ID}")
         assert resp.status_code == 404
 
     def test_commit_expected_empty_204(self, api_client) -> None:
         settings = self._make(api_client)
         resp = _commit(
             api_client,
-            f"/api/v1/user-settings/{settings['id']}",
+            f"/api/v1/my/admin/settings/{settings['id']}",
             json={"expected": {}},
         )
         assert resp.status_code == 204, resp.text
         # GH #319/#377: GET is get-or-create — the committed row is gone
         # and a fresh defaults row comes back (a NEW id, never 404).
-        recreated = api_client.get("/api/v1/user-settings")
+        recreated = api_client.get("/api/v1/my/admin/settings")
         assert recreated.status_code == 200
         assert recreated.json()["id"] != settings["id"]
 
@@ -263,14 +263,14 @@ class TestUserSettingsDeleteContract:
         )
         other_client = login_as(other["phone"], "other-pass-1")
 
-        url = f"/api/v1/user-settings/{settings['id']}"
+        url = f"/api/v1/my/admin/settings/{settings['id']}"
         resp = _dry_run(other_client, url)
         assert resp.status_code == 403
         assert resp.json()["detail"]["code"] == "AUTH_FORBIDDEN"
         resp = _commit(other_client, url, json={"expected": {}})
         assert resp.status_code == 403
         # Row survives the foreign attempts.
-        assert api_client.get("/api/v1/user-settings").status_code == 200
+        assert api_client.get("/api/v1/my/admin/settings").status_code == 200
 
 
 # ─── photos (dependent: photo_tags) ──────────────────────────────────────────

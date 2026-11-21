@@ -135,17 +135,18 @@ def test_truncate_respects_fk_order(db_engine):
 
 class TestAuthenticatedApiClient:
     def test_api_client_is_authenticated_admin(self, api_client) -> None:
-        """api_client arrives with a valid admin memo_session cookie jar.
+        """api_client arrives with a valid admin memo_staff_session cookie jar.
 
         The fixture INSERTs the admin after the per-test truncate and logs
-        in via POST /api/v1/auth/login (spec §7) — /me must answer 200
-        with the admin principal.
+        in via POST /api/v1/auth/login (spec §7) — the whoami
+        ``GET /api/v1/my`` must answer 200 with the admin principal
+        (#584 §4.1; the former /auth/me probe is gone).
         """
-        resp = api_client.get("/api/v1/auth/me")
+        resp = api_client.get("/api/v1/my")
         assert resp.status_code == 200, f"api_client not authenticated: {resp.text}"
         body = resp.json()
-        assert body["user"]["phone"] == "+79990000001"
-        assert body["user"]["role"] == "admin"
+        assert body["phone"] == "+79990000001"
+        assert body["roles"] == ["admin"]
 
     def test_api_client_admin_row_exists_in_db(self, api_client) -> None:
         """The fixture admin is a real users row (role=admin, is_active)."""
@@ -224,8 +225,8 @@ class TestLoginAs:
 
         other = login_as(phone, "master-pass-1")
 
-        resp = other.get("/api/v1/auth/me")
+        resp = other.get("/api/v1/my")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["user"]["phone"] == phone
-        assert body["user"]["role"] == "master"
+        assert body["phone"] == phone
+        assert body["roles"] == ["master"]

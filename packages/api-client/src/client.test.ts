@@ -273,9 +273,38 @@ describe('401 unauthorized handler', () => {
       mockFetchResponse(401, { detail: { code: 'AUTH_UNAUTHORIZED', message: 'No session' } })
     ));
 
-    await expect(api('/api/v1/auth/me', schema)).rejects.toThrow(ApiError);
+    await expect(api('/api/v1/auth/login', schema)).rejects.toThrow(ApiError);
 
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  // #584 spec §5 — the whoami exception is EXACT-PATH ONLY: a 401 on
+  // GET /api/v1/my is the guest bootstrap probe (getMyWhoami resolves it
+  // to null), never a mid-work session death. A /my PREFIX is deliberately
+  // NOT excepted — an expired session on the branch profiles must still
+  // redirect the admin to /login.
+  it('does not invoke the handler for a 401 on GET /api/v1/my (whoami probe)', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(401, { detail: { code: 'AUTH_UNAUTHORIZED', message: 'No session' } })
+    ));
+
+    await expect(api('/api/v1/my', schema)).rejects.toThrow(ApiError);
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('invokes the handler for a 401 on GET /api/v1/my/master (exception is exact-path, not a prefix)', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(401, { detail: { code: 'AUTH_UNAUTHORIZED', message: 'No session' } })
+    ));
+
+    await expect(api('/api/v1/my/master', schema)).rejects.toThrow(ApiError);
+
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it('throws ApiError as before when no handler is registered', async () => {

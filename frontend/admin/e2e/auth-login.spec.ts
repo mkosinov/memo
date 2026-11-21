@@ -91,8 +91,11 @@ test.describe('User Scenario 3 — wrong password', () => {
     await expect(page).toHaveURL(/\/login/);
 
     // No session cookie was set (401, no Set-Cookie on the login response).
+    // #584 §2.6: the staff cookie is memo_staff_session — a failed login
+    // must leave the NEW name unset (the old memo_session is nobody's
+    // ticket since the rename).
     expect(setCookieHeader).toBeNull();
     const cookies = await page.context().cookies();
-    expect(cookies.find((c) => c.name === 'memo_session')).toBeUndefined();
+    expect(cookies.find((c) => c.name === 'memo_staff_session')).toBeUndefined();
   });
 });

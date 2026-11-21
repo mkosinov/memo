@@ -1,7 +1,8 @@
-"""GH #513 — client cabinet read: GET /api/v1/my/photos contract.
+"""GH #513 — client cabinet read: GET /api/v1/my/client/photos contract.
 
-The second /my read endpoint (spec §«Контракт API → GET
-/api/v1/my/photos»): ALL the client's photos regardless of publicity,
+The second cabinet read endpoint (spec §«Контракт API → GET
+/my/photos», moved under the client branch ``/my/client/*`` by
+ADR-015/#584 — contract unchanged): ALL the client's photos regardless of publicity,
 owner = the session's client card (``user.client_id``), fixed sorting
 (``created_at`` DESC, id ASC — the deterministic tie-break canon),
 ``PaginationParams`` brick as the only input, tags resolved server-side
@@ -36,7 +37,7 @@ from tests.conftest import insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
 
-MY_URL = "/api/v1/my/photos"
+MY_URL = "/api/v1/my/client/photos"
 
 
 # ─── helpers (conftest direct-SQL pattern, test_my_records_read_api) ───────────
@@ -294,7 +295,7 @@ class TestGuards:
     def test_staff_token_in_client_cookie_401(self, api_client) -> None:
         """A LIVE staff session token copied into the client cookie name
         resolves, then fails the role barrier — the same single 401."""
-        staff_token = api_client.cookies.get("memo_session")
+        staff_token = api_client.cookies.get("memo_staff_session")
         assert staff_token, "fixture admin session missing"
         api_client.cookies.clear()
         api_client.cookies.set("memo_client_session", staff_token)

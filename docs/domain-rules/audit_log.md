@@ -11,7 +11,7 @@ AuditLog — append-only журнал действий пользователе�
 | id | string(36) UUID | ✅ | uuid4 | PK |
 | created_at | datetime | ✅ | now() | Момент действия (indexed) |
 | user_id | string(36) | ❌ | null | Автор; FK `users.id` **ON DELETE SET NULL** (indexed) |
-| user_role | string(20) | ✅ | — | **Снимок роли на момент действия** (later promotions do not rewrite history) |
+| user_role | string(20) | ✅ | — | **Снимок первичной роли на момент действия** (later promotions do not rewrite history); #584: первичная = `roles[0]` staff-first списка актёра |
 | action | string(24) | ✅ | — | Действие (indexed): create / update / patch / delete / archive / restore / reorder / password_link_issued |
 | entity | string(32) | ✅ | — | Каноническое имя сущности (GH #239): records, clients, payments, … |
 | entity_id | string(36) | ❌ | null | null для reorder |
@@ -23,7 +23,8 @@ AuditLog — append-only журнал действий пользователе�
 ## Invariants
 
 - **Append-only:** приложение никогда не обновляет и не удаляет строки журнала; API не имеет POST/PUT/PATCH/DELETE.
-- **Снимок роли:** `user_role` — роль в момент события, не текущая `users.role`.
+- **Снимок роли:** `user_role` — роль в момент события, не текущая `users.role`; колонка одна, а актёр несёт список — пишется первичная роль (`roles[0]`, staff-first).
+- **Формат актёра `{user_id, roles}` (#584):** контекствар запроса несёт **список** ролей, не одиночную роль. Классические одиночные гарды передают 1-кортеж; комбинированный гард «кто я» (`GET /api/v1/my`) пишет **одну запись** — первичная учётка (сотрудника, если его кука валидна, иначе клиентская) со **всеми** резолвнутыми ролями (staff-first); проигравшая проба своей записи не создаёт.
 - **Удаление автора не блокируется:** `user_id` ON DELETE SET NULL — ссылка обнуляется (`{id: null, label: null}`), строка остаётся.
 - **Нет N+1:** автор-подпись резолвится в том же запросе (users ⟕ staff), отдельные запросы на строку запрещены.
 

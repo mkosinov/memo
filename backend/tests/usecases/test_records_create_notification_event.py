@@ -71,7 +71,7 @@ class TestNotifyFlagActorGate:
         # an FK to users.
         user = insert_user(f"+7999{_uuid4().hex[:7]}", "test", role="admin")
         activity = await _orm_activity(db_session, create_activity)
-        token = audit.set_actor(user_id=user["id"], role="admin")
+        token = audit.set_actor(user_id=user["id"], roles=["admin"])
         try:
             record = await create_record(
                 db_session=db_session,

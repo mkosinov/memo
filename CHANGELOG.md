@@ -83,6 +83,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     3 manual by design); dev-пересид — связные данные без ошибок
     сидирования.
   - Status: `docs/status/2026-11-21-specialty-dictionary-599.md`
+
+## [Unreleased] — 2026-11-14
+
+### Added
+- **GH #584 — Волна ADR-015 (/my-namespace): комбинированный guard, whoami
+  с обеими персонами, ветки /my/client|master|admin, /my/settings,
+  упразднение /auth/me** — branch `584-adr015-my-namespace` (15 коммитов
+  `4e76bab0..42cabd88`, base `55e3004a` = main на момент лендинга плана;
+  109 файлов, +4199/−1268; спека
+  `docs/specs/2026-11-12-adr015-my-namespace-584-design.md` рев.5, план
+  `docs/plans/2026-11-12-adr015-my-namespace-584-plan.md` и ADR-015
+  (`docs/decisions/015-api-url-audience-namespaces.md`, clause 3 +
+  amendments) — на main до старта волны, unchanged by IMPL):
+  - **whoami + комбинированный guard (T1 `4e76bab0`+`eab47e03`):** чистый
+    резолв обеих персон (клиентская сессия + стафф) с guard-конвертом;
+    новый `GET /api/v1/my`.
+  - **Клиентский кабинет (T2 `89a967ed`+`2adfd369`):** слит под
+    `/api/v1/my/client/*`, плоские `/my/*` пути вычищены.
+  - **Стафф-ветки (T3 `7876c8ea`):** `/my/master` + `/my/admin` —
+    branch-гарды (чужая ветка → 403), `MyStaffProfileResponse`,
+    `/portrait`→`/avatar`.
+  - **Настройки под ветками (T4 `7dcf44dc`):**
+    `/my/{master,admin,client}/settings` (тот же аккаунт, те же строки),
+    остров `/api/v1/user-settings` снесён (404), CSRF-пины per mutation
+    route.
+  - **Упразднение /auth/me (T5 `47a4aeff`):** 404; потребители переехали
+    на whoami / стафф-ветки / тело login.
+  - **Кука стаффа (T6 `27bf4bcb`):** `memo_session` →
+    `memo_staff_session`; пины «новое имя в login-issues-only» и «старое
+    имя анонимно даже с живым токеном».
+  - **api-client (T7 `09ff8f70`):** `getMyWhoami` + стафф-ветки.
+  - **Admin bootstrap (T8 `63fd987c`):** цепочка `getMyWhoami` →
+    `getMyStaffProfile(branch)`.
+  - **E2E (T9 `1c71e050`+`b39bd98d`):** ренейм куки, пути настроек,
+    whoami-провода + спека сценария 5 «две куки» (spec §7); регресс-фикс
+    `keepPreviousData` на branch profile query — смена ветки
+    (login role-guess → whoami) больше не теряет несохранённые правки
+    формы.
+  - **Дом-правила и чистка (T10 `759867e3`+`468c0ae1`+`42cabd88`):**
+    auth/profile/staff/user_settings/audit_log под /my-namespace + свип
+    ретро-имён + e2e cleanup matcher настроек под ветками.
+  - Tests: полный backend pytest **4245p/0f/92s** (последний полный прогон
+    на задаче куки; дальше — таргет-зелень задач + ревью-свипы),
+    api-client vitest **595/595** + tsc чист, admin vitest **3175/3175** +
+    tsc + build чисты, e2e — admin-спеки **31/31**, web **20/20** (вкл.
+    новую спеку сценария 5), полная репродукция 2-шардами **522 pass**
+    (2 пре-экзистинг флейка зелёные в изоляции; CI-шарды арбитрят на PR);
+    lint_budget exit 0, mypy 0; visual gate — §7 N/A, скрипт exit 0.
+    Приёмка — все DoD-строки плана закрыты (per-task ревью + финальный
+    full-feature ревью; находки — фиксы `468c0ae1`/`42cabd88`).
+
+## [Unreleased] — 2026-11-13
+
+### Added
 - **GH #601 — Флаг «не показывать в web» для локаций** — branch
   `601-locations-web-visibility` (6 задач + 2 фикс-коммита
   `fecf11fd..78cbd9b2`, base `92896269` = origin/main; 54 файла,
@@ -226,6 +280,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     #602) → fallback pair-visual-debugging Playwright **12/12 PASS**
     (высота 612px = 0.85×720 точно в обоих режимах, инвариант вкладок
     Δ=0.0px ≤ 5px, кнопка вне скролл-тела, футер в вьюпорте).
+
+### Fixed
+- **GH #553 — Редактирование занятия: честная календарная дата вместо
+  «открытая неделя + день недели»** — branch
+  `553-activity-edit-honest-date` (5 задач `e68d73f2..46feb8fd`, base
+  `2172bd75`; 6 файлов, +702/−36; спека
+  `docs/specs/2026-10-25-activity-edit-honest-date-design.md` рев.2.1,
+  план `docs/plans/2026-11-13-activity-edit-honest-date-plan.md` — оба
+  на main, unchanged by IMPL):
+  - **start-ветка обновления (T1 `e68d73f2`):** `updateActivity`
+    принимает тот же dual time-source юнион, что `addActivity`
+    (#280) — `start` (полный floating-local ISO из datetime-поля
+    формы; в PATCH payload as-is; дата может быть вне открытой
+    недели, прошедшие даты разрешены осознанно) WINS над легаси
+    `dayIndex`+`startMinutes` (после #553 — только штампы сетки
+    WeekView/DayView/dnd; при обоих источниках `start` WINS);
+    путь промисифицирован — `Promise<void>` (`mutateAsync` +
+    catch-guard, зеркало #595), fire-and-forget потребители
+    не тронуты.
+  - **Полная дата из формы (T2 `548c86c9`):** вкладка редактирования
+    отправляет выбранную календарную дату как есть; очистка поля →
+    '' → патча нет вовсе.
+  - **Тост успеха патча даты-времени (T3 `295a2dbb`):** «Сохранено:
+    {услуга} — {дата formatDateRu}, {время}» — ТОЛЬКО для
+    `start`-патчей (info kind, канон тостов #261); остальные поля и
+    отказы молчаливы (откат оптимистики владеет ошибками).
+  - **E2E (T4 `92b00468` + T5 `46feb8fd`):** US-1 перенос занятия в
+    другую неделю (выбранная дата соблюдена), US-2 перенос в тот же
+    день, US-3 правка только времени, US-5 открытие-закрытие без
+    правок; US-4 drag-тест зелёный без правок ожиданий.
+  - Tests: vitest units зелёные (ScheduleDataContext **54/54**,
+    ActivityDetailsModal spec **107/107** вкл. 3 toast-теста,
+    соседние specs зелёные, tsc + eslint чистые); e2e
+    `activity-details-modal.spec.ts` **20/20** (два pre-existing
+    сценария 14/15 — load-флейки, зелёные изолированно); визуальный
+    гейт: check 3 passed; checks 1–2 перекрыты решением пользователя
+    2026-11-13 вариант (a) — e2e приняты как верификация (VCC спеки
+    предшествует канону статической достижимости 2026-11-12;
+    follow-up #615).
+   - Status: `docs/status/2026-11-13-activity-edit-honest-date-553.md`
 
 ## [Unreleased] — 2026-11-12
 

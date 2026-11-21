@@ -6,7 +6,6 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return {
     ...actual,
-    getMe: vi.fn(),
     login: vi.fn(),
     logout: vi.fn(),
     setUnauthorizedHandler: vi.fn(),

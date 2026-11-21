@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { toMyPaymentRowView } from "../to-my-payment-vm";
 import { myPaymentItem } from "@/app/__tests__/fixtures/cabinet";
 
-describe("toMyPaymentRowView (GET /my/payments item → «Мои платежи» row view)", () => {
+describe("toMyPaymentRowView (GET /my/client/payments item → «Мои платежи» row view)", () => {
   it("maps all row fields: formatted amount, method label, payment date, lesson context", () => {
     const vm = toMyPaymentRowView(
       myPaymentItem({

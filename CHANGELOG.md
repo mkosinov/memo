@@ -76,6 +76,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `specialty` у IMPL (спека §3.5, plain string + комментарий);
     #584-пересечение закрыто на новом base (пин-тесты `_PUBLIC_GETS`).
   - Status: `docs/status/2026-11-21-adr015-dictionaries-606.md`
+- **GH #599 — Справочник направлений (specialty dictionary)** — branch
+  `599-specialty-dictionary` (9 задач, 15 коммитов
+  `c7a987dd..95663f0b`, base `697afb55` = origin/main; 155 файлов,
+  +9590/−759; спека
+  `docs/specs/2026-11-13-specialty-dictionary-599-design.md`
+  рев.4 и план
+  `docs/plans/2026-11-13-specialty-dictionary-599-plan.md` 9/9
+  (`c2d0e661`) — оба на main, unchanged by IMPL):
+  - **Сущность Specialty (T1 `c7a987dd`):** таблица-справочник
+    `specialties` (`title: String(100)`, функциональный уникальный
+    индекс `lower(title)` — «Живопись» и «живопись» не сосуществуют,
+    коллизия → 409 `SPECIALTY_TITLE_TAKEN` поимкой `IntegrityError`),
+    нормализация title (trim/схлопывание пробелов/NFC), CRUD-роутер —
+    зеркало позиционного (пагинированный список без `sort_by`, `/all`
+    с `BARE_LIST_MAX_ROWS`, гарды `specialties:read`/`write` + CSRF);
+    миграция R1 — `specialties`, M2M `staff_specialties` (составной
+    PK, оба FK CASCADE, `passive_deletes`), `services.specialty_id`
+    FK RESTRICT NULLABLE.
+  - **Delete-family (T2 `60a883ab`):** удаление направления — семейный
+    контракт #324: услуги — видимая блокирующая (`allowed_actions: []`,
+    счётчик по всем услугам включая архивные — услуга без направления
+    недопустима), staff-связи — auto-cascade (карточки сотрудников
+    переживают); строки Specialty в `deletion.md`/`_overview.md`
+    (`bd1cbc88`).
+  - **Услуги на specialty_id (T3 `b55c83d2` + `48071eee`):** миграция
+    R2 — NOT NULL + дроп `services.specialty`; create/PUT —
+    обязательное поле (неизвестный id → 422 предвалидацией, образец
+    материалов), PATCH — absent → сохранить, явный `null` → 422;
+    `ServiceView` сохраняет строку `specialty` + `specialty_id`;
+    один JOIN на все чтения (N+1-гвард), сортировка
+    `sort_by=specialty` через `domain/sorting.py`.
+  - **Master-секция на specialty_ids (T4 `dc72cdb6`):** миграция R3 —
+    дроп `masters.specialty` (CSV-строка уходит); вход
+    `specialty_ids` hard-replace (дедуп, >50 → 422, неизвестный id →
+    422, пустой набор при живой секции → 422 `SPECIALTY_REQUIRED` —
+    D5 без ослабления); ответ — алфавитная строка + id-набор;
+    сортировка staff — скалярный подзапрос
+    `string_agg(title ORDER BY title, ', ')` с `always_nulls_last`.
+  - **Прочие потребители (T5 `114bb309`):** copy-week ремап архивного
+    мастера по пересечению связей по id (не по тексту); `/my` —
+    specialties из связей по алфавиту (update — принимается-но-
+    игнорируется, как было); аудит-снапшоты несут название вместе с
+    `specialty_id`; sqladmin на связь; web e2e-фикстуры с raw-SQL
+    INSERT переведены на новую схему (обе фикстуры).
+  - **api-client (T6 `59eae7ca`):** `Specialty*` схемы + эндпоинты
+    (зеркало позиционного набора), `ServiceCreate.specialty_id`,
+    `MasterSectionInput.specialty_ids`; контракт **616/616**.
+  - **Сид и предзагрузка (T7 `893a1d10` + `328f4f8f`):** dev-сид —
+    ≥3 направлений, мастер с 2+ направлениями не по алфавиту;
+    `_apply_specialties` — upsert по `lower(title)`, format-agnostic
+    (стык с #612 — меняется только парсер); `specialties.yaml`;
+    ссылки по названию в `services.yaml`/`staff.yaml` с
+    регистронезависимым резолвом (неизвестное → ошибка с именем
+    значения), старый CSV-ключ `specialty` в staff.yaml → ошибка.
+  - **Admin UI (T8 `20d536a0`+`f87dbd36`+`4b22f623`+`e66b9541`):**
+    вкладка «Направления» на странице услуг (третий вид по образцу
+    «Материалов»: `specialties-tab`, свой URL-префикс, провайдер
+    server-paginated, монтируется только видимый вид), таблица +
+    модалка (одно поле, 409-подпись), удаление — deferred-конвейер
+    (dry_run/commit, 409-дерево «Услуги: N»); в модалке услуги —
+    словарный селект из `/specialties/all`, в StaffModal — чекбоксы,
+    payload на `specialty_ids`.
+  - **E2E (T9 `95663f0b` + T8):** сценарии 1–2 (создание услуги с
+    направлением из выпадающего списка + алфавитная строка у
+    сотрудника) и 3–5a/b/c (`specialties-crud`) — RED-GREEN-REFACTOR.
+  - Tests: backend pytest **4287 passed / 92 skipped**, ruff +
+    lint_budget **109/109**; admin vitest **3212/3212** (tsc + lint
+    чистые); api-client **616/616**; e2e: specialties-crud **5/5**,
+    расширенные service/staff спеки **17/17**, tags canary **11/11**;
+    visual gate — **exit 0** (1 machine PASSED `specialties-tab`,
+    3 manual by design); dev-пересид — связные данные без ошибок
+    сидирования.
+  - Status: `docs/status/2026-11-21-specialty-dictionary-599.md`
 
 ## [Unreleased] — 2026-11-14
 

@@ -58,10 +58,12 @@ class TestStaffTableShape:
         assert not ({"specialty", "color", "position"} & cols)
 
     def test_masters_is_extension_table(self) -> None:
-        """masters: PK staff_id → staff.id CASCADE + specialty/color/is_active."""
+        """masters: PK staff_id → staff.id CASCADE + color/is_active
+        (GH #599 R3: the free-text specialty column is dropped — the
+        directions live in the staff_specialties M2M)."""
         cols = _cols("masters")
         assert cols == {
-            "staff_id", "specialty", "color", "is_active",
+            "staff_id", "color", "is_active",
             "created_at", "updated_at",
         }
 
@@ -138,8 +140,11 @@ class TestOrmModels:
     def test_master_model_is_extension(self) -> None:
         assert Master.__tablename__ == "masters"
         cols = {c.name for c in Master.__table__.columns}
-        assert cols == {"staff_id", "specialty", "color", "is_active",
+        # GH #599 R3: the free-text ``specialty`` column is dropped —
+        # the directions live in the ``staff_specialties`` M2M.
+        assert cols == {"staff_id", "color", "is_active",
                         "created_at", "updated_at"}
+        assert "staff_specialties" in Base.metadata.tables
 
     def test_position_model_and_join(self) -> None:
         assert Position.__tablename__ == "positions"
@@ -183,12 +188,19 @@ class TestSeed:
                     staff_ids = [r[0] for r in staff_rows]
 
                     masters = (await session.execute(text(
-                        "SELECT staff_id, specialty, color, is_active FROM masters"
+                        "SELECT staff_id, color, is_active FROM masters"
                     ))).all()
                     by_staff = {m[0]: m[1:] for m in masters}
                     assert sorted(by_staff.keys()) == sorted(staff_ids)
-                    # The first card's extension row (former alias m1):
-                    assert by_staff[staff_ids[0]] == ("живопись", "#5B8C7A", 1)
+                    # The first card's extension row (former alias m1);
+                    # GH #599: its direction is a staff_specialties LINK.
+                    assert by_staff[staff_ids[0]] == ("#5B8C7A", 1)
+                    m1_specs = (await session.execute(text(
+                        "SELECT s.title FROM staff_specialties ss"
+                        " JOIN specialties s ON s.id = ss.specialty_id"
+                        " WHERE ss.staff_id = :sid ORDER BY s.title"
+                    ), {"sid": staff_ids[0]})).scalars().all()
+                    assert m1_specs == ["Живопись"]
 
                     positions = dict((await session.execute(text(
                         "SELECT id, title FROM positions"

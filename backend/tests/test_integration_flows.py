@@ -14,6 +14,19 @@ pytestmark = pytest.mark.integration
 # ─── Flow 1: Phone → Client → Record → Visit (complete booking) ─────────────
 
 
+def _flow_specialty_id(api_client) -> str:
+    """GH #599: the flow suites' direction row — the ``specialty_id``
+    source for inline service payloads."""
+    resp = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    if resp.status_code == 409:  # exists in this test already
+        resp = api_client.get("/api/v1/specialties/all")
+        return next(
+            r["id"] for r in resp.json() if r["title"].lower() == "живопись"
+        )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
 class TestBookingFlow:
     """End-to-end booking: phone lookup → client creation → record → visit."""
 
@@ -31,7 +44,8 @@ class TestBookingFlow:
         }).json()
         service = api_client.post("/api/v1/services", json={
             "title": "Картина маслом", "description": "Мастер-класс",
-            "image_url": "https://example.com/img.jpg", "specialty": "живопись",
+            "image_url": "https://example.com/img.jpg",
+            "specialty_id": _flow_specialty_id(api_client),
             "min_age": 6, "max_age": 99, "duration": 90, "record_info": "Фартук",
         }).json()
         location = api_client.post("/api/v1/locations", json={
@@ -310,7 +324,8 @@ class TestCapacityFlow:
         }).json()
         service = api_client.post("/api/v1/services", json={
             "title": "Акварель", "description": "Тест",
-            "image_url": "https://example.com/img.jpg", "specialty": "акварель",
+            "image_url": "https://example.com/img.jpg",
+            "specialty_id": _flow_specialty_id(api_client),
             "min_age": 4, "max_age": 99, "duration": 60, "record_info": "",
         }).json()
         location = api_client.post("/api/v1/locations", json={

@@ -72,7 +72,7 @@ const mockArchiveService = vi.mocked(archiveService);
 const mockRestoreService = vi.mocked(restoreService);
 
 const serviceResponse = {
-  id: 's1', title: 'Test', description: '', image_url: '', specialty: '',
+  id: 's1', title: 'Test', description: '', image_url: '', specialty_id: 'spec-painting', specialty: '',
   min_age: 0, max_age: 18, duration: 180, record_info: '',
   tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '',
 };
@@ -99,13 +99,13 @@ describe('useServicesMutations', () => {
   describe('useCreateService', () => {
     it('calls createService with the provided data', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockCreateService.mockResolvedValue({ id: 'new-1', title: 'Test', description: '', image_url: '', specialty: '', min_age: 0, max_age: 18, duration: 180, record_info: '', tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '' });
+      mockCreateService.mockResolvedValue({ id: 'new-1', title: 'Test', description: '', image_url: '', specialty_id: 'spec-painting', specialty: '', min_age: 0, max_age: 18, duration: 180, record_info: '', tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '' });
 
       const { result } = renderHook(() => useCreateService(), { wrapper });
 
       const payload: ServiceCreate = {
         title: 'Test', duration: 180, description: '', image_url: '',
-        specialty: '', min_age: 0, max_age: 18, record_info: '',
+        specialty_id: 'spec-painting', min_age: 0, max_age: 18, record_info: '',
         tariffs: [], tag_ids: [], materials: [], is_public: true,
       };
 
@@ -119,14 +119,14 @@ describe('useServicesMutations', () => {
     it('invalidates the services query cache on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockCreateService.mockResolvedValue({ id: 'new-1', title: 'Test', description: '', image_url: '', specialty: '', min_age: 0, max_age: 18, duration: 180, record_info: '', tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '' });
+      mockCreateService.mockResolvedValue({ id: 'new-1', title: 'Test', description: '', image_url: '', specialty_id: 'spec-painting', specialty: '', min_age: 0, max_age: 18, duration: 180, record_info: '', tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '' });
 
       const { result } = renderHook(() => useCreateService(), { wrapper });
 
       await act(async () => {
         await result.current.mutateAsync({
           title: 'Test', duration: 180, description: '', image_url: '',
-          specialty: '', min_age: 0, max_age: 18, record_info: '',
+          specialty_id: 'spec-painting', min_age: 0, max_age: 18, record_info: '',
           tariffs: [], tag_ids: [], materials: [], is_public: true,
         });
       });
@@ -138,7 +138,7 @@ describe('useServicesMutations', () => {
   describe('useUpdateService', () => {
     it('calls updateService with id and data', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockUpdateService.mockResolvedValue({ id: 's1', title: 'Updated', description: '', image_url: '', specialty: '', min_age: 0, max_age: 18, duration: 180, record_info: '', tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '' });
+      mockUpdateService.mockResolvedValue({ id: 's1', title: 'Updated', description: '', image_url: '', specialty_id: 'spec-painting', specialty: '', min_age: 0, max_age: 18, duration: 180, record_info: '', tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '' });
 
       const { result } = renderHook(() => useUpdateService(), { wrapper });
 
@@ -150,7 +150,7 @@ describe('useServicesMutations', () => {
           title: 'Updated',
           description: '',
           image_url: '',
-          specialty: '',
+          specialty_id: 'spec-painting',
           min_age: 0,
           max_age: 18,
           duration: 180,
@@ -172,7 +172,7 @@ describe('useServicesMutations', () => {
     it('invalidates the services query cache on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockUpdateService.mockResolvedValue({ id: 's1', title: 'Updated', description: '', image_url: '', specialty: '', min_age: 0, max_age: 18, duration: 180, record_info: '', tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '' });
+      mockUpdateService.mockResolvedValue({ id: 's1', title: 'Updated', description: '', image_url: '', specialty_id: 'spec-painting', specialty: '', min_age: 0, max_age: 18, duration: 180, record_info: '', tariffs: [], tags: [], materials: [], is_public: true, archived: false, created_at: '', updated_at: '' });
 
       const { result } = renderHook(() => useUpdateService(), { wrapper });
 
@@ -180,7 +180,7 @@ describe('useServicesMutations', () => {
         title: 'Updated',
         description: '',
         image_url: '',
-        specialty: '',
+        specialty_id: 'spec-painting',
         min_age: 0,
         max_age: 18,
         duration: 180,

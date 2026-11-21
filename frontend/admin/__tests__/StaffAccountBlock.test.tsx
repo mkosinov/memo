@@ -16,6 +16,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { StaffResponse } from '@memo/api-client';
 import {
   mockPositionMaster,
+  mockSpecialties,
   createMockStaffResponse,
 } from './helpers/mockData';
 
@@ -48,6 +49,7 @@ function setupEdit(staff: StaffResponse) {
       mode="edit"
       staff={staff}
       positions={POSITIONS}
+      specialties={mockSpecialties}
       onSubmit={onSubmit}
       onPatchPhone={onPatchPhone}
       onIssueLink={onIssueLink}
@@ -133,6 +135,7 @@ describe('edit: phone save via patchUser (S5)', () => {
         mode="edit"
         staff={staffWithAccount()}
         positions={POSITIONS}
+        specialties={mockSpecialties}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
         onPatchPhone={onPatchPhone}
         onIssueLink={vi.fn()}
@@ -156,6 +159,7 @@ describe('edit: phone save via patchUser (S5)', () => {
         mode="edit"
         staff={staffWithAccount()}
         positions={POSITIONS}
+        specialties={mockSpecialties}
         onSubmit={onSubmit}
         onPatchPhone={onPatchPhone}
         onIssueLink={vi.fn()}
@@ -195,6 +199,7 @@ describe('edit: issue link button (S3)', () => {
         mode="edit"
         staff={staffWithAccount()}
         positions={POSITIONS}
+        specialties={mockSpecialties}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
         onIssueLink={onIssueLink}
         onClose={vi.fn()}
@@ -218,6 +223,7 @@ describe('edit: issue link button (S3)', () => {
         mode="edit"
         staff={staffWithAccount()}
         positions={POSITIONS}
+        specialties={mockSpecialties}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
         onIssueLink={onIssueLink}
         onClose={vi.fn()}
@@ -244,6 +250,7 @@ describe('edit: issue link button (S3)', () => {
         mode="edit"
         staff={staffWithAccount()}
         positions={POSITIONS}
+        specialties={mockSpecialties}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
         onIssueLink={onIssueLink}
         onClose={onClose}
@@ -270,6 +277,7 @@ describe('create: passwordless account block (S1)', () => {
         mode="create"
         staff={null}
         positions={POSITIONS}
+        specialties={mockSpecialties}
         onSubmit={onSubmit}
         onIssueLink={onIssueLink}
         onClose={vi.fn()}

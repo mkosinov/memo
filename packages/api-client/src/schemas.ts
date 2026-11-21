@@ -40,7 +40,11 @@ export type ArchiveStatus = z.infer<typeof ArchiveStatusSchema>;
 // (masters.is_active inverted) — three independent flags, D3.
 
 export const StaffMasterSectionSchema = z.object({
+  // GH #599: `specialty` stays the DISPLAY string (linked dictionary titles
+  // joined «, » alphabetically); `specialty_ids` rides along in the SAME
+  // title order — the id set for master-section writes.
   specialty: z.string(),
+  specialty_ids: z.array(z.string()),
   color: z.string(),
   archived: z.boolean(), // schedule-archive flag (masters.is_active inverted, D3)
   created_at: z.string(),
@@ -87,12 +91,16 @@ export type StaffResponse = z.infer<typeof StaffResponseSchema>;
 
 // Master-section payload (D5): presence semantics validated at the SERVICE
 // level (SPECIALTY_REQUIRED/COLOR_REQUIRED error codes) — the schema accepts
-// empty strings rather than a generic 422, mirroring backend MasterSection.
+// an empty id list / empty strings rather than a generic 422, mirroring
+// backend MasterSection. GH #599: `specialty_ids` is the hard-replace
+// direction set (M2M staff_specialties) — duplicates dedupe server-side,
+// >50 distinct ids → 422, unknown id → 422; a live section with an empty
+// set raises SPECIALTY_REQUIRED there, not here.
 // `archived` (T8 Gap A): optional — undefined = don't touch the schedule
 // flag; true = archive the section (row kept, D7); false = restore acting.
 export const MasterSectionInputSchema = z
   .object({
-    specialty: z.string(),
+    specialty_ids: z.array(z.string()),
     color: z.string(),
     archived: z.boolean().optional(),
   })
@@ -223,6 +231,31 @@ export type PositionUpdate = z.input<typeof PositionUpdateSchema>;
 
 export const PositionPatchSchema = PositionCreateSchema.partial();
 export type PositionPatch = z.input<typeof PositionPatchSchema>;
+
+// ─── SpecialtyResponse (GH #599 — studio direction dictionary) ──────────────
+// Mirror of the positions dictionary minus the system-row machinery: every
+// row is user-defined (uuid id, no is_system), no PUT (rename is PATCH).
+// The title is normalized server-side (trim, whitespace collapse, NFC);
+// uniqueness is case-insensitive (409 SPECIALTY_TITLE_TAKEN on collision).
+
+export const SpecialtyResponseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  created_at: z.string(), // ISO datetime string
+  updated_at: z.string(), // ISO datetime string
+});
+export type SpecialtyResponse = z.infer<typeof SpecialtyResponseSchema>;
+
+export const SpecialtyCreateSchema = z
+  .object({
+    title: z.string().min(1).max(100),
+  })
+  .strict();
+export type SpecialtyCreate = z.input<typeof SpecialtyCreateSchema>;
+
+// PATCH is the only rename surface (no PUT endpoint); backend SpecialtyPatch.
+export const SpecialtyPatchSchema = SpecialtyCreateSchema.partial();
+export type SpecialtyPatch = z.input<typeof SpecialtyPatchSchema>;
 
 // ─── LocationResponse ──────────────────────────────────────────────────────
 
@@ -371,6 +404,9 @@ export const ServiceResponseSchema = z.object({
   title: z.string(),
   description: z.string(),
   image_url: z.string(),
+  // GH #599: the direction reference (required UUID) + the read-only display
+  // string from the link — both travel on the response.
+  specialty_id: z.string(),
   specialty: z.string(),
   min_age: z.number(),
   max_age: z.number().nullable(),
@@ -786,7 +822,10 @@ export const ServiceCreateSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().optional().default(''),
   image_url: z.string().optional().default(''),
-  specialty: z.string().optional().default(''),
+  // GH #599: the direction is a dictionary REFERENCE — required, no default
+  // (unknown id → 422 server-side, the materials #223 pattern). The display
+  // title string is read-only on the response.
+  specialty_id: z.string(),
   min_age: z.number().min(0).max(18).default(0),
   max_age: z.number().min(0).max(18).default(18),
   duration: z.number().min(15).max(480),
@@ -1380,6 +1419,7 @@ export function paginatedSchema<T extends z.ZodType>(itemSchema: T) {
 
 export const StaffListResponseSchema = paginatedSchema(StaffResponseSchema);
 export const PositionListResponseSchema = paginatedSchema(PositionResponseSchema);
+export const SpecialtyListResponseSchema = paginatedSchema(SpecialtyResponseSchema);
 export const MasterViewListResponseSchema = paginatedSchema(MasterViewResponseSchema);
 export const LocationListResponseSchema = paginatedSchema(LocationResponseSchema);
 export const TagListResponseSchema = paginatedSchema(TagResponseSchema);
@@ -1422,6 +1462,7 @@ export const MyPaymentListResponseSchema = paginatedSchema(MyPaymentItemSchema);
 
 export const StaffAllResponseSchema = z.array(StaffResponseSchema);
 export const PositionAllResponseSchema = z.array(PositionResponseSchema);
+export const SpecialtyAllResponseSchema = z.array(SpecialtyResponseSchema);
 export const MasterViewAllResponseSchema = z.array(MasterViewResponseSchema);
 export const LocationAllResponseSchema = z.array(LocationResponseSchema);
 export const ServiceAllResponseSchema = z.array(ServiceResponseSchema);

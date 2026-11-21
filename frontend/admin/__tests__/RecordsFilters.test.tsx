@@ -106,6 +106,7 @@ const ACTIVE_SERVICE: ServiceResponse = {
   description: 'Живопись маслом',
   image_url: '',
   specialty: 'живопись',
+  specialty_id: 'spec-painting',
   min_age: 12,
   max_age: 99,
   duration: 150,

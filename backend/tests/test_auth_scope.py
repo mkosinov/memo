@@ -152,8 +152,8 @@ class TestResolveScope:
             {"id": staff_id},
         )
         query_db_params(
-            "INSERT INTO masters (staff_id, specialty, color, is_active, "
-            "created_at, updated_at) VALUES (:id, 'живопись', '#5B8C7A', 1, "
+            "INSERT INTO masters (staff_id, color, is_active, "
+            "created_at, updated_at) VALUES (:id, '#5B8C7A', 1, "
             "datetime('now'), datetime('now'))",
             {"id": staff_id},
         )
@@ -224,8 +224,8 @@ class TestResolveScope:
             {"id": staff_id},
         )
         query_db_params(
-            "INSERT INTO masters (staff_id, specialty, color, is_active, "
-            "created_at, updated_at) VALUES (:id, 'керамика', '#AA0000', 0, "
+            "INSERT INTO masters (staff_id, color, is_active, "
+            "created_at, updated_at) VALUES (:id, '#AA0000', 0, "
             "datetime('now'), datetime('now'))",
             {"id": staff_id},
         )
@@ -322,9 +322,9 @@ class _ScopeProbeMaster:
         )
         if db_has_masters_row:
             query_db_params(
-                "INSERT OR IGNORE INTO masters (staff_id, specialty, color, "
+                "INSERT OR IGNORE INTO masters (staff_id, color, "
                 "is_active, created_at, updated_at) "
-                "VALUES (:id, 'живопись', '#5B8C7A', 1, "
+                "VALUES (:id, '#5B8C7A', 1, "
                 "datetime('now'), datetime('now'))",
                 {"id": staff_id},
             )

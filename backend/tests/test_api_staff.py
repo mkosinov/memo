@@ -90,12 +90,18 @@ class TestStaffCrud:
         assert body["master"]["specialty"] == "живопись"
         assert body["master"]["color"] == "#5B8C7A"
         assert body["master"]["archived"] is False
-        # masters row exists with staff_id = card id
+        # masters row exists with staff_id = card id; the direction is
+        # an M2M link (GH #599 — no specialty column on masters)
         rows = query_db(
             f"SELECT * FROM masters WHERE staff_id='{body['id']}'"
         )
         assert len(rows) == 1
-        assert rows[0]["specialty"] == "живопись"
+        links = query_db(
+            "SELECT s.title FROM staff_specialties ss "
+            "JOIN specialties s ON s.id = ss.specialty_id "
+            f"WHERE ss.staff_id='{body['id']}'"
+        )
+        assert [r["title"] for r in links] == ["живопись"]
 
     def test_create_with_positions(self, api_client) -> None:
         pos_id = _seed_position("СММ")
@@ -332,18 +338,206 @@ class TestStaffCrud:
     def test_master_section_requires_specialty(self, api_client) -> None:
         resp = api_client.post(
             "/api/v1/staff",
-            json=_create_payload(master={"specialty": "", "color": "#5B8C7A"}),
+            json=_create_payload(master={"specialty_ids": [], "color": "#5B8C7A"}),
         )
         assert resp.status_code == 422
         assert resp.json()["detail"]["code"] == "SPECIALTY_REQUIRED"
 
-    def test_master_section_requires_color(self, api_client) -> None:
+    def test_master_section_requires_color(
+        self, api_client, create_specialty
+    ) -> None:
+        spec = create_specialty("Живопись")
         resp = api_client.post(
             "/api/v1/staff",
-            json=_create_payload(master={"specialty": "живопись", "color": ""}),
+            json=_create_payload(
+                master={"specialty_ids": [spec["id"]], "color": ""}
+            ),
         )
         assert resp.status_code == 422
         assert resp.json()["detail"]["code"] == "COLOR_REQUIRED"
+
+
+class TestMasterSectionSpecialtyIds:
+    """GH #599 Task 4 — the master section on ``specialty_ids`` (M2M).
+
+    Hard-replace semantics mirroring ``position_ids``: dedup, >50 after
+    dedup → 422, unknown id → 422, D5 non-empty set on a live section;
+    the response carries the display string (titles joined «, »,
+    alphabetically — NOT input order) plus ``specialty_ids`` in the same
+    title order.
+    """
+
+    def test_response_joined_string_alphabetical(
+        self, api_client, create_specialty
+    ) -> None:
+        """Ввод «Керамика», «Живопись» → ``specialty = "Живопись, Керамика"``
+        (spec §9 distinguishing data: alphabetical, not input order)."""
+        cer = create_specialty("Керамика")
+        zhi = create_specialty("Живопись")
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={
+                    "specialty_ids": [cer["id"], zhi["id"]],  # NOT alphabetical
+                    "color": "#5B8C7A",
+                }
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["master"]["specialty"] == "Живопись, Керамика"
+        # ids ride the SAME title order as the display string
+        assert body["master"]["specialty_ids"] == [zhi["id"], cer["id"]]
+        # links landed in the M2M
+        links = query_db(
+            "SELECT ss.specialty_id FROM staff_specialties ss "
+            f"WHERE ss.staff_id='{body['id']}'"
+        )
+        assert {row["specialty_id"] for row in links} == {cer["id"], zhi["id"]}
+
+    def test_empty_set_live_section_422_specialty_required(
+        self, api_client
+    ) -> None:
+        """D5 без ослабления: a live master section MUST carry ≥1 id."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(master={"specialty_ids": [], "color": "#5B8C7A"}),
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "SPECIALTY_REQUIRED"
+
+    def test_unknown_id_422(self, api_client) -> None:
+        ghost = str(_uuid.uuid4())
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={"specialty_ids": [ghost], "color": "#5B8C7A"}
+            ),
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "SPECIALTY_NOT_FOUND"
+
+    def test_duplicates_deduped(self, api_client, create_specialty) -> None:
+        spec = create_specialty("Живопись")
+        other = create_specialty("Батик")
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={
+                    "specialty_ids": [spec["id"], spec["id"], other["id"], spec["id"]],
+                    "color": "#5B8C7A",
+                }
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["master"]["specialty"] == "Батик, Живопись"
+        assert len(body["master"]["specialty_ids"]) == 2
+        links = query_db(
+            "SELECT specialty_id FROM staff_specialties "
+            f"WHERE staff_id='{body['id']}'"
+        )
+        assert len(links) == 2, "duplicates must collapse to one link row"
+
+    def test_over_50_after_dedup_422(self, api_client) -> None:
+        ids = [str(_uuid.uuid4()) for _ in range(51)]
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={"specialty_ids": ids, "color": "#5B8C7A"}
+            ),
+        )
+        assert resp.status_code == 422
+
+    def test_hard_replace_on_put(self, api_client, create_specialty) -> None:
+        cer = create_specialty("Керамика")
+        zhi = create_specialty("Живопись")
+        created = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={
+                    "specialty_ids": [cer["id"], zhi["id"]],
+                    "color": "#5B8C7A",
+                }
+            ),
+        ).json()
+        resp = api_client.put(
+            f"/api/v1/staff/{created['id']}",
+            json=_create_payload(
+                master={"specialty_ids": [zhi["id"]], "color": "#111111"}
+            ),
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["master"]["specialty"] == "Живопись"
+        links = query_db(
+            "SELECT specialty_id FROM staff_specialties "
+            f"WHERE staff_id='{created['id']}'"
+        )
+        assert [row["specialty_id"] for row in links] == [zhi["id"]]
+
+    def test_patch_replaces_set(self, api_client, create_specialty) -> None:
+        spec = create_specialty("Живопись")
+        other = create_specialty("Батик")
+        created = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={"specialty_ids": [spec["id"]], "color": "#5B8C7A"}
+            ),
+        ).json()
+        resp = api_client.patch(
+            f"/api/v1/staff/{created['id']}",
+            json={
+                "master": {
+                    "specialty_ids": [other["id"]],
+                    "color": "#5B8C7A",
+                }
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["master"]["specialty"] == "Батик"
+
+    def test_section_removal_clears_links(
+        self, api_client, create_specialty
+    ) -> None:
+        """«Без мастер-секции направлений нет» (§4.4): ``master: null``
+        drops the extension row AND the staff_specialties links."""
+        spec = create_specialty("Живопись")
+        created = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={"specialty_ids": [spec["id"]], "color": "#5B8C7A"}
+            ),
+        ).json()
+        resp = api_client.put(
+            f"/api/v1/staff/{created['id']}",
+            json=_create_payload(first_name="Имя", last_name="Фамилия"),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["master"] is None
+        assert query_db(
+            f"SELECT * FROM staff_specialties WHERE staff_id='{created['id']}'"
+        ) == []
+
+    def test_masters_view_carries_joined_string(
+        self, api_client, create_specialty
+    ) -> None:
+        """/api/v1/masters (расписание) — та же joined-строка."""
+        cer = create_specialty("Керамика")
+        zhi = create_specialty("Живопись")
+        api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={
+                    "specialty_ids": [cer["id"], zhi["id"]],
+                    "color": "#5B8C7A",
+                }
+            ),
+        )
+        resp = api_client.get("/api/v1/masters")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["total"] == 1
+        assert resp.json()["items"][0]["specialty"] == "Живопись, Керамика"
 
 
 class TestStaffList:
@@ -406,25 +600,87 @@ class TestStaffList:
         assert resp.json()["total"] == 1
         assert resp.json()["items"][0]["id"] == created["id"]
 
-    def test_sort_by_specialty_via_join(self, api_client) -> None:
-        """specialty sort: masters-extension LEFT JOIN, NULLs last."""
+    def test_sort_by_specialty_asc_nulls_last(
+        self, api_client, create_specialty
+    ) -> None:
+        """GH #599 §9 sorting pin: the key is the DISPLAY string (titles
+        joined «, » alphabetically) — card with «Керамика»+«Живопись»
+        sorts under "Живопись, Керамика", NOT input order; a card
+        without the master section (NULL) sorts LAST."""
+        cer = create_specialty("Керамика")
+        zhi = create_specialty("Живопись")
+        bat = create_specialty("Батик")
         no_master = api_client.post(
             "/api/v1/staff", json=_create_payload(first_name="НетМастера")
         ).json()
-        painter = api_client.post(
+        both = api_client.post(  # display string "Живопись, Керамика"
             "/api/v1/staff",
             json=_create_payload(
-                first_name="А", master={"specialty": "живопись", "color": "#111111"}
+                first_name="А",
+                master={
+                    "specialty_ids": [cer["id"], zhi["id"]],
+                    "color": "#111111",
+                },
+            ),
+        ).json()
+        batik = api_client.post(  # display string "Батик"
+            "/api/v1/staff",
+            json=_create_payload(
+                first_name="Б",
+                master={"specialty_ids": [bat["id"]], "color": "#222222"},
             ),
         ).json()
 
         resp = api_client.get("/api/v1/staff?sort_by=specialty&sort_order=asc")
         assert resp.status_code == 200
         ids = [m["id"] for m in resp.json()["items"]]
-        # asc: painter (живопись) first; no-master section (NULL) LAST.
-        assert ids.index(painter["id"]) < ids.index(no_master["id"])
+        # asc by display string: Батик < Живопись, Керамика; NULL LAST.
+        assert ids.index(batik["id"]) < ids.index(both["id"])
+        assert ids.index(no_master["id"]) > ids.index(both["id"])
 
-    def test_sort_by_color_desc_nulls_last(self, api_client) -> None:
+    def test_sort_by_specialty_desc_nulls_last(
+        self, api_client, create_specialty
+    ) -> None:
+        """specialty desc: «пустые — в конце» holds in BOTH directions
+        (#266 → #599): reversed display-string order, the no-section
+        card STILL last."""
+        cer = create_specialty("Керамика")
+        zhi = create_specialty("Живопись")
+        no_master = api_client.post(
+            "/api/v1/staff", json=_create_payload(first_name="НетМастера")
+        ).json()
+        both = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                first_name="А",
+                master={
+                    "specialty_ids": [cer["id"], zhi["id"]],
+                    "color": "#111111",
+                },
+            ),
+        ).json()
+        batik = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                first_name="Б",
+                master={
+                    "specialty_ids": [create_specialty("Батик")["id"]],
+                    "color": "#222222",
+                },
+            ),
+        ).json()
+
+        resp = api_client.get("/api/v1/staff?sort_by=specialty&sort_order=desc")
+        assert resp.status_code == 200
+        ids = [m["id"] for m in resp.json()["items"]]
+        # desc: "Живопись, Керамика" > "Батик"; NULL STILL LAST.
+        assert ids.index(both["id"]) < ids.index(batik["id"])
+        assert ids.index(no_master["id"]) > ids.index(batik["id"])
+
+    def test_sort_by_color_desc_nulls_last(
+        self, api_client, create_specialty
+    ) -> None:
+        spec = create_specialty("Живопись")
         no_master = api_client.post(
             "/api/v1/staff", json=_create_payload(first_name="НетМастера")
         ).json()
@@ -432,14 +688,14 @@ class TestStaffList:
             "/api/v1/staff",
             json=_create_payload(
                 first_name="Красный",
-                master={"specialty": "с", "color": "#FF0000"},
+                master={"specialty_ids": [spec["id"]], "color": "#FF0000"},
             ),
         ).json()
         blue = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
                 first_name="Синий",
-                master={"specialty": "с", "color": "#0000FF"},
+                master={"specialty_ids": [spec["id"]], "color": "#0000FF"},
             ),
         ).json()
 
@@ -449,57 +705,31 @@ class TestStaffList:
         assert ids.index(red["id"]) < ids.index(blue["id"])
         assert ids.index(no_master["id"]) > ids.index(blue["id"])
 
-    def test_sort_by_specialty_desc_nulls_last(self, api_client) -> None:
-        """specialty desc: «пустые — в конце» holds in BOTH directions (#266).
-
-        always_nulls_last policy: cards without a master section (NULL
-        specialty) sort after sectioned ones even on desc — the inverse
-        of the canonical desc → nullslast is the same side here, so the
-        pin is the BOTH-directions invariant together with the asc test.
-        """
-        no_master = api_client.post(
-            "/api/v1/staff", json=_create_payload(first_name="НетМастера")
-        ).json()
-        sculptor = api_client.post(
-            "/api/v1/staff",
-            json=_create_payload(
-                first_name="С", master={"specialty": "скульптура", "color": "#222222"}
-            ),
-        ).json()
-        painter = api_client.post(
-            "/api/v1/staff",
-            json=_create_payload(
-                first_name="Ж", master={"specialty": "живопись", "color": "#111111"}
-            ),
-        ).json()
-
-        resp = api_client.get("/api/v1/staff?sort_by=specialty&sort_order=desc")
-        assert resp.status_code == 200
-        ids = [m["id"] for m in resp.json()["items"]]
-        # desc: скульптура > живопись (reverse alpha); NULL still LAST.
-        assert ids.index(sculptor["id"]) < ids.index(painter["id"])
-        assert ids.index(no_master["id"]) > ids.index(painter["id"])
-
-    def test_sort_by_color_asc_nulls_last(self, api_client) -> None:
+    def test_sort_by_color_asc_nulls_last(
+        self, api_client, create_specialty
+    ) -> None:
         """color asc: «пустые — в конце» — nulls LAST on asc (#266).
 
         This is the direction where always_nulls_last DIVERGES from the
         canonical policy (asc → nullsfirst): a NULL color must NOT jump
         to the top.
         """
+        spec = create_specialty("Живопись")
         no_master = api_client.post(
             "/api/v1/staff", json=_create_payload(first_name="НетМастера")
         ).json()
         blue = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
-                first_name="Синий", master={"specialty": "с", "color": "#0000FF"}
+                first_name="Синий",
+                master={"specialty_ids": [spec["id"]], "color": "#0000FF"},
             ),
         ).json()
         red = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
-                first_name="Красный", master={"specialty": "с", "color": "#FF0000"}
+                first_name="Красный",
+                master={"specialty_ids": [spec["id"]], "color": "#FF0000"},
             ),
         ).json()
 
@@ -647,11 +877,21 @@ def _seed_activity(api_client, master_id: str, service_id: str, location_id: str
 
 def _seed_service_and_location(api_client) -> tuple[str, str]:
     """The (service_id, location_id) pair an activity needs."""
+    # GH #599: the direction reference — create/fetch the dictionary row
+    # (case-insensitive: the section adapter seeds «живопись» lowercase).
+    spec = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    spec_id = (
+        spec.json()["id"] if spec.status_code == 201
+        else next(
+            r["id"] for r in api_client.get("/api/v1/specialties/all").json()
+            if r["title"].lower() == "живопись"
+        )
+    )
     service = api_client.post(
         "/api/v1/services",
         json={
             "title": "S", "description": "D", "image_url": "http://x",
-            "specialty": "s", "min_age": 6, "max_age": 99,
+            "specialty_id": spec_id, "min_age": 6, "max_age": 99,
             "duration": 60, "record_info": "ri",
         },
     ).json()
@@ -1320,6 +1560,69 @@ class TestPositionsCrud:
         assert resp.json()["detail"]["code"] == "POSITION_NOT_FOUND"
 
 
+class TestStaffListQueryCount:
+    """N+1 guard (GH #599 §4.4): the master-section specialty strings
+    ride a batched load (selectin pattern — same contract as the
+    positions bundle) — the SELECT count of a staff list must NOT grow
+    with the number of cards on the page.
+
+    Mirror of ``TestServicesListQueryCount``: seed 3 cards (with and
+    without sections), measure, add 3 more, measure again — equal.
+    """
+
+    def test_list_query_count_constant_across_row_counts(
+        self, api_client, db_engine, create_specialty
+    ) -> None:
+        from sqlalchemy import event
+
+        spec = create_specialty("Живопись")
+
+        counter = {"n": 0}
+
+        def _before(conn, cursor, statement, params, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                counter["n"] += 1
+
+        event.listen(db_engine.sync_engine, "before_cursor_execute", _before)
+        try:
+            for i in range(3):
+                api_client.post(
+                    "/api/v1/staff",
+                    json=_create_payload(
+                        first_name=f"Мастер{i}",
+                        master={"specialty_ids": [spec["id"]], "color": "#111111"},
+                    ),
+                )
+            api_client.post("/api/v1/staff", json=_create_payload(first_name="Без0"))
+            counter["n"] = 0  # measure ONLY the list request
+            resp = api_client.get("/api/v1/staff?per_page=50")
+            assert resp.status_code == 200, resp.text
+            assert len(resp.json()["items"]) == 4
+            count_four = counter["n"]
+
+            for i in range(3, 6):
+                api_client.post(
+                    "/api/v1/staff",
+                    json=_create_payload(
+                        first_name=f"Мастер{i}",
+                        master={"specialty_ids": [spec["id"]], "color": "#111111"},
+                    ),
+                )
+            api_client.post("/api/v1/staff", json=_create_payload(first_name="Без1"))
+            counter["n"] = 0  # measure ONLY the list request
+            resp = api_client.get("/api/v1/staff?per_page=50")
+            assert resp.status_code == 200, resp.text
+            assert len(resp.json()["items"]) == 8
+            count_eight = counter["n"]
+        finally:
+            event.remove(db_engine.sync_engine, "before_cursor_execute", _before)
+
+        assert count_four == count_eight, (
+            "N+1 regression: SELECTs grew with rows "
+            f"({count_four} → {count_eight})"
+        )
+
+
 class TestMastersReadOnly:
     """GET /api/v1/masters — read-only view over staff + masters (D8).
 
@@ -1410,7 +1713,7 @@ class TestMastersReadOnly:
             master_rows = [
                 {
                     "staff_id": r["id"],
-                    "specialty": "живопись",
+                    # GH #599: color/flag only — directions live in the M2M
                     "color": "#5B8C7A",
                     "is_active": True,
                     "created_at": now,
@@ -1576,15 +1879,19 @@ class TestMasterSectionArchiveFlag:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["master"]["archived"] is True
-        # row KEPT with specialty/color (D7) — only the flag flipped
+        # row KEPT with color + links (D7) — only the flag flipped
         rows = query_db(
-            f"SELECT specialty, color, is_active FROM masters "
+            f"SELECT color, is_active FROM masters "
             f"WHERE staff_id='{created['id']}'"
         )
         assert len(rows) == 1
         assert rows[0]["is_active"] == 0
-        assert rows[0]["specialty"] == "живопись"
         assert rows[0]["color"] == "#5B8C7A"
+        links = query_db(
+            "SELECT specialty_id FROM staff_specialties "
+            f"WHERE staff_id='{created['id']}'"
+        )
+        assert len(links) == 1
         # /masters no longer lists the archived section
         assert api_client.get("/api/v1/masters").json()["total"] == 0
 

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import pytest
+from sqlalchemy import select
 
 from src.models.activity import Activity
 from src.models.client import Client
@@ -29,6 +30,7 @@ from src.models.master import Master
 from src.models.payment import Payment
 from src.models.record import Record
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.visit import Visit
 from src.schemas.activity import ActivityResponse
@@ -55,6 +57,21 @@ class _World:
     activity: Activity
     record: Record
     payments: list[Payment] = field(default_factory=list)
+
+
+async def _world_specialty_id(db_session) -> str:
+    """GH #599: one direction row for the world's service (idempotent —
+    concurrent worlds in one session share the title row)."""
+    existing = await db_session.execute(
+        select(Specialty.id).where(Specialty.title == "Живопись")
+    )
+    found = existing.scalar_one_or_none()
+    if found is not None:
+        return found
+    row = Specialty(title="Живопись")
+    db_session.add(row)
+    await db_session.flush()
+    return row.id
 
 
 async def _seed_world(
@@ -96,7 +113,9 @@ async def _seed_world(
             "title": "Картина маслом",
             "description": "desc",
             "image_url": "https://example.com/x.jpg",
-            "specialty": "живопись",
+            # GH #599: the direction is a dictionary reference — one row
+            # per world, created above the service.
+            "specialty_id": await _world_specialty_id(db_session),
             "min_age": 6,
             "max_age": 99,
             "duration": 90,
@@ -124,7 +143,6 @@ async def _seed_world(
     await db_session.flush()
     master = Master(
         staff_id=staff.id,
-        specialty=ext_kwargs.get("specialty", "живопись"),
         color=ext_kwargs.get("color", "#5B8C7A"),
     )
     db_session.add(master)

@@ -121,9 +121,7 @@ async def test_seed_services_have_no_material_hint_column(
     async with db_manager.async_session() as session:
         # pragma_table_info lists the live columns of `services`; the
         # assertion is that the dropped column no longer appears in them.
-        result = await session.execute(
-            text("SELECT name FROM pragma_table_info('services')")
-        )
+        result = await session.execute(text("SELECT name FROM pragma_table_info('services')"))
         columns = {row.name for row in result}
         assert "material_hint" not in columns
 
@@ -139,9 +137,7 @@ async def test_seed_service_materials_exist(db_manager: DBManager) -> None:
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
-        result = await session.execute(
-            text("SELECT COUNT(*) FROM service_materials")
-        )
+        result = await session.execute(text("SELECT COUNT(*) FROM service_materials"))
         total = result.scalar()
         assert total >= 3, f"expected >=3 service_materials links, got {total}"
 
@@ -151,8 +147,7 @@ async def test_seed_service_materials_exist(db_manager: DBManager) -> None:
         )
         linked_services = result.scalar()
         assert linked_services >= 3, (
-            f"expected >=3 distinct services with non-empty materials, "
-            f"got {linked_services}"
+            f"expected >=3 distinct services with non-empty materials, got {linked_services}"
         )
 
         result = await session.execute(
@@ -179,9 +174,7 @@ async def test_seed_locations_have_location_hint(db_manager: DBManager) -> None:
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
-        result = await session.execute(
-            text("SELECT id, location_hint FROM locations")
-        )
+        result = await session.execute(text("SELECT id, location_hint FROM locations"))
         rows = result.all()
         assert len(rows) == 3
         for row in rows:
@@ -311,9 +304,7 @@ async def test_seed_has_guest_tag(db_manager: DBManager) -> None:
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
-        result = await session.execute(
-            text("SELECT COUNT(*) FROM tags WHERE title = 'гость'")
-        )
+        result = await session.execute(text("SELECT COUNT(*) FROM tags WHERE title = 'гость'"))
         assert result.scalar() == 1, "guest tag does not exist"
 
 
@@ -445,9 +436,7 @@ async def test_seed_fixed_week_dates_in_range(db_manager: DBManager) -> None:
             start = _dt.fromisoformat(row.start) if isinstance(row.start, str) else row.start
             assert start.year == 2026, f"{start}: expected year 2026"
             assert start.month == 6, f"{start}: expected month 6"
-            assert 15 <= start.day <= 21, (
-                f"{start}: expected day 15-21"
-            )
+            assert 15 <= start.day <= 21, f"{start}: expected day 15-21"
 
 
 async def test_seed_activities_pinned_to_functional_weeks(db_manager: DBManager) -> None:
@@ -519,9 +508,7 @@ async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
     ]
 
     async with db_manager.async_session() as session:
-        result = await session.execute(
-            text("SELECT created_at FROM photos ORDER BY created_at")
-        )
+        result = await session.execute(text("SELECT created_at FROM photos ORDER BY created_at"))
         rows = result.all()
         assert len(rows) == 9
 
@@ -584,9 +571,7 @@ async def test_seed_cabinet_photos_delta(db_manager: DBManager) -> None:
         assert c2_rows[0].filename == "/images/maria-canvas.jpg"
 
         # Public gallery is untouched: exactly the 7 original photos.
-        result = await session.execute(
-            text("SELECT COUNT(*) FROM photos WHERE is_public = 1")
-        )
+        result = await session.execute(text("SELECT COUNT(*) FROM photos WHERE is_public = 1"))
         assert result.scalar() == 7
 
         # No tag links on the delta rows (photo_tags stays at 5).
@@ -602,10 +587,7 @@ async def test_seed_records_link_to_fixed_week(db_manager: DBManager) -> None:
 
     async with db_manager.async_session() as session:
         result = await session.execute(
-            text(
-                "SELECT r.id, a.start FROM records r "
-                "JOIN activities a ON r.activity_id = a.id"
-            )
+            text("SELECT r.id, a.start FROM records r JOIN activities a ON r.activity_id = a.id")
         )
         rows = result.all()
         assert len(rows) == 6
@@ -653,16 +635,15 @@ async def test_seed_records_match_original_master_service(db_manager: DBManager)
             return _dt.fromisoformat(val) if isinstance(val, str) else val
 
         expected: set[tuple[str, str, str, int]] = {
-            ("Анна Иванова", "Морской пейзаж", "Середа", 0),      # r1
-            ("Мария Петрова", "Ручная лепка", "Большакова", 0),   # r2
-            ("Елена Сидорова", "Картина акрилом", "П.", 1),       # r3
+            ("Анна Иванова", "Морской пейзаж", "Середа", 0),  # r1
+            ("Мария Петрова", "Ручная лепка", "Большакова", 0),  # r2
+            ("Елена Сидорова", "Картина акрилом", "П.", 1),  # r3
             ("Анна Иванова", "Мини-картина акрилом", "Середа", 1),  # r4
-            ("Ольга Новикова", "Морской пейзаж", "Середа", 3),    # r5
-            ("Дмитрий Козлов", "Морской пейзаж", "Середа", 5),    # r6
+            ("Ольга Новикова", "Морской пейзаж", "Середа", 3),  # r5
+            ("Дмитрий Козлов", "Морской пейзаж", "Середа", 5),  # r6
         }
         actual = {
-            (r.client_name, r.service_title, r.master_last_name,
-             _parse_dt(r.start).weekday())
+            (r.client_name, r.service_title, r.master_last_name, _parse_dt(r.start).weekday())
             for r in rows
         }
         assert actual == expected
@@ -694,3 +675,92 @@ async def test_seed_handles_month_boundary_overflow(db_manager: DBManager) -> No
             assert count > 0, "Expected activities to be created after seed"
     finally:
         seed_module.WEEK3_START = original_week3
+
+
+# ---------------------------------------------------------------------------
+# GH #599 Task 7 — specialty dictionary seed (spec §6)
+# ---------------------------------------------------------------------------
+
+
+async def test_seed_specialties_dictionary_enriched(db_manager: DBManager) -> None:
+    """GH #599 §6: the dev seed ships ≥3 directions, including a FREE leaf
+    (no services, no staff links) — the distinguishing data of e2e scenario
+    5c (deleting a free direction)."""
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        titles = set((await session.execute(text("SELECT title FROM specialties"))).scalars())
+        assert len(titles) >= 3, (
+            f"seed enrichment (§6): expected ≥3 specialties, got {sorted(titles)}"
+        )
+        assert {"Живопись", "Керамика", "Декор"} <= titles
+
+        # «Декор» is the free leaf: nothing references it
+        free = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM specialties sp "
+                "WHERE sp.title = 'Декор' "
+                "AND NOT EXISTS (SELECT 1 FROM services s "
+                "                WHERE s.specialty_id = sp.id) "
+                "AND NOT EXISTS (SELECT 1 FROM staff_specialties ss "
+                "                WHERE ss.specialty_id = sp.id)"
+            )
+        )
+        assert free.scalar() == 1, "«Декор» must be a free direction (no links)"
+
+
+async def test_seed_staff_multi_specialty_entered_not_alphabetical(
+    db_manager: DBManager,
+) -> None:
+    """GH #599 §6: ≥1 staff member carries 2+ directions entered NOT in
+    alphabetical order — the distinguishing data of spec scenario 2 and the
+    sorting tests (the display string stays alphabetical: «Живопись,
+    Керамика», never the input order)."""
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        # Анастасия П. carries both directions
+        linked = set(
+            (
+                await session.execute(
+                    text(
+                        "SELECT sp.title FROM staff_specialties ss "
+                        "JOIN specialties sp ON sp.id = ss.specialty_id "
+                        "JOIN staff st ON st.id = ss.staff_id "
+                        "WHERE st.first_name = 'Анастасия' AND st.last_name = 'П.'"
+                    )
+                )
+            ).scalars()
+        )
+        assert linked == {"Живопись", "Керамика"}
+
+        # D5-shaped coherence: every master section carries ≥1 direction
+        bare = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM masters m WHERE NOT EXISTS ("
+                "SELECT 1 FROM staff_specialties ss WHERE ss.staff_id = m.staff_id)"
+            )
+        )
+        assert bare.scalar() == 0, "a seeded master section has no direction"
+
+
+def test_seed_specialty_literals_non_alphabetical_guard() -> None:
+    """Guard the DATA literals (not the DB): the multi-direction input is
+    written NOT in alphabetical order and the dictionary holds ≥3 titles —
+    requirements of §6 that the unordered link table cannot express."""
+    from src.seed.seed import _MASTER_SPECIALTIES, _SPECIALTY_RAW
+
+    assert len(_SPECIALTY_RAW) >= 3
+    multi = [list(specs) for specs in _MASTER_SPECIALTIES.values() if len(specs) >= 2]
+    assert multi, "seed enrichment (§6): no staff with 2+ specialties"
+    assert any(specs != sorted(specs) for specs in multi), (
+        "seed enrichment (§6): the multi-direction input order must NOT be alphabetical"
+    )
+    # every referenced alias is declared in the dictionary section
+    declared = {alias for alias, _title in _SPECIALTY_RAW}
+    for specs in _MASTER_SPECIALTIES.values():
+        assert set(specs) <= declared, "master section references an undeclared specialty"

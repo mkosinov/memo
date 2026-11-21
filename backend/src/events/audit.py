@@ -113,8 +113,12 @@ ENTITY_SIGNATURES: dict[str, EntitySignature] = {
     ),
     "services": EntitySignature(
         title="Услуга",
-        label_fields=("title", "specialty"),
-        snapshot_fields=("title", "specialty", "duration", "is_active"),
+        # GH #599 R2: the journaled scalar is ``specialty_id`` (the
+        # reference) — the display title lives in the dictionary and
+        # must not be read off the relationship here (lazy load under
+        # async SQLAlchemy); the label keeps the human title only.
+        label_fields=("title",),
+        snapshot_fields=("title", "specialty_id", "duration", "is_active"),
     ),
     "locations": EntitySignature(
         title="Локация",
@@ -135,6 +139,11 @@ ENTITY_SIGNATURES: dict[str, EntitySignature] = {
         title="Должность",
         label_fields=("title",),
         snapshot_fields=("title", "is_system"),
+    ),
+    "specialties": EntitySignature(
+        title="Направление",
+        label_fields=("title",),
+        snapshot_fields=("title",),
     ),
     "activities": EntitySignature(
         title="Занятие",
@@ -178,8 +187,19 @@ ENTITY_SIGNATURES: dict[str, EntitySignature] = {
     ),
     "masters": EntitySignature(
         title="Мастер",
+        # GH #599 Task 5 (spec §4.6): the journaled direction set lives
+        # in the ``staff_specialties`` M2M — the label/snapshot fields
+        # name the WRITER-FED plain attributes (``MasterService
+        # .upsert_extension`` attaches ``specialty`` = the display
+        # string and ``specialty_ids`` = the id list onto the row; the
+        # non-``Mapped`` attrs on ``Master`` are never columns). The
+        # getattr walk reads them with NO lazy load; a row the writer
+        # never fed keeps the class-level ``None`` and snapshots its
+        # real columns only (inert skip — no dead-attribute reads).
+        # The id rides NEXT to the string: a dictionary rename never
+        # rewrites the historical meaning of a journaled row.
         label_fields=("specialty",),
-        snapshot_fields=("staff_id", "specialty", "color"),
+        snapshot_fields=("staff_id", "specialty", "specialty_ids", "color"),
         titled_label=True,
     ),
     # NB: no `tariffs`/`user_profiles` entries — not canonical #239 entities

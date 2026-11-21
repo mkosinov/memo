@@ -381,22 +381,35 @@ async def _seed_visitor_with_visits(db_session):
     """
     from datetime import UTC, datetime, timedelta
 
+    from sqlalchemy import select
+
     from src.models.activity import Activity
     from src.models.client import Client
     from src.models.location import Location
     from src.models.master import Master
     from src.models.record import Record
     from src.models.service import Service
+    from src.models.specialty import Specialty
     from src.models.staff import Staff
     from src.models.visit import Visit
     from src.models.visitor import Visitor
 
     staff = Staff(first_name="Vv", last_name="T")
+    # GH #599: the direction is a dictionary reference — find-or-create.
+    spec = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if spec is None:
+        spec = Specialty(title="Живопись")
+        db_session.add(spec)
+        await db_session.flush()
     service = Service(
         title="VvSvc",
         description="d",
         image_url="http://x",
-        specialty="s",
+        specialty_id=spec.id,
         min_age=5,
         duration=60,
         record_info="r",
@@ -404,7 +417,7 @@ async def _seed_visitor_with_visits(db_session):
     location = Location(title="VvLoc", capacity=20)
     db_session.add_all([staff, service, location])
     await db_session.flush()
-    db_session.add(Master(staff_id=staff.id, specialty="s", color="#000000"))
+    db_session.add(Master(staff_id=staff.id, color="#000000"))
     await db_session.flush()
     activity = Activity(
         master_id=staff.id,

@@ -126,6 +126,20 @@ def test_upgrade_head_preserves_legacy_staff_data(tmp_path: Path) -> None:
     command.upgrade(cfg, LEGACY_REVISION)
     _legacy_data(db_path)
 
+    # GH #599 bridge: R2 flips services.specialty_id to NOT NULL — the
+    # legacy service row links to a dictionary row BEFORE the chain walks
+    # past R1 (the real dev base is reseeded instead; this test only needs
+    # its rows to survive the walk to head).
+    command.upgrade(cfg, "a5c7e9b1d3f4")
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO specialties (id, title, created_at, updated_at)"
+            " VALUES ('spec-1', 'живопись', datetime('now'), datetime('now'))"
+        ))
+        conn.execute(text("UPDATE services SET specialty_id = 'spec-1'"))
+    engine.dispose()
+
     # 2. THE migration under test.
     command.upgrade(cfg, "head")
 
@@ -154,14 +168,17 @@ def test_upgrade_head_preserves_legacy_staff_data(tmp_path: Path) -> None:
 
         # Step 2 — one masters row per former master, INCLUDING the archived
         # one and the «администратор» (is_active carried over verbatim, D3).
+        # GH #599 R3: the free-text ``specialty`` column is dropped at head
+        # (structure-only, no data conversion — the dev base is reseeded);
+        # the rows themselves survive the walk.
         assert rows(
-            "SELECT staff_id, specialty, color, is_active FROM masters"
+            "SELECT staff_id, color, is_active FROM masters"
             " ORDER BY staff_id"
         ) == [
-            ("a1", "", "#222222", 1),
-            ("m1", "живопись", "#5B8C7A", 1),
-            ("m2", "керамика", "#6B7E9C", 1),
-            ("m9", "живопись", "#111111", 0),
+            ("a1", "#222222", 1),
+            ("m1", "#5B8C7A", 1),
+            ("m2", "#6B7E9C", 1),
+            ("m9", "#111111", 0),
         ]
 
         # Steps 3–4 — dictionary populated on a data-bearing DB; links follow

@@ -231,3 +231,65 @@ class TestSortContractGuard:
             f"Literal only: {set(get_args(literal)) - set(sort_map)}, "
             f"map only: {set(sort_map) - set(get_args(literal))}"
         )
+
+
+# ─── GH #599 Task 4: staff ``specialty`` — the aggregate order key ───────────
+
+
+class TestStaffSpecialtyAggregateKey:
+    """The staff ``specialty`` sort key is the DISPLAY string — a
+    correlated scalar subquery ``string_agg(title, ', ' ORDER BY title)``
+    over the ``staff_specialties`` links (spec §4.5, NOT a GROUP BY over
+    the outer query). Dialect contract: the SAME expression renders and
+    runs on SQLite (suite) and PostgreSQL (prod family) — both support
+    the in-aggregate ``ORDER BY`` syntax (SQLite ≥ 3.44).
+    """
+
+    def test_renders_ordered_string_agg_on_both_dialects(self) -> None:
+        from sqlalchemy.dialects import postgresql, sqlite
+
+        from src.domain.sorting import staff_specialty_aggregate
+
+        expr = staff_specialty_aggregate()
+
+        for dialect in (sqlite.dialect(), postgresql.dialect()):
+            sql = str(expr.compile(dialect=dialect))
+            assert "string_agg" in sql, f"{dialect.name}: string_agg missing:\n{sql}"
+            assert "ORDER BY" in sql, f"{dialect.name}: in-aggregate ORDER BY missing:\n{sql}"
+
+    def test_subquery_correlates_when_embedded(self) -> None:
+        """Embedded in a staff ORDER BY (the real usage), the subquery's
+        FROM carries ONLY the join pair — ``staff.id`` stays an outer
+        reference (a re-declared staff inside would make the sort a
+        cross-join over the whole table, not per-row)."""
+        from sqlalchemy import select
+        from sqlalchemy.dialects import sqlite
+
+        from src.domain.sorting import staff_specialty_aggregate
+        from src.models.staff import Staff
+
+        stmt = select(Staff.id).order_by(
+            staff_specialty_aggregate().desc().nulls_last(), Staff.id.asc()
+        )
+        sql = str(stmt.compile(dialect=sqlite.dialect()))
+        assert "FROM staff_specialties JOIN specialties ON" in sql
+        assert ", staff\n" not in sql.split("FROM staff_specialties", 1)[1], (
+            f"subquery must not re-read staff:\n{sql}"
+        )
+        # the aggregate orders by the dictionary title, joined with «, ».
+        assert "string_agg(specialties.title, ', ' ORDER BY title)" in sql
+
+    def test_staff_specialty_key_uses_aggregate_expression(self) -> None:
+        """The staff sort map rides the shared expression (local
+        resolvers are banned — docs/domain-rules/_overview.md). Compiled
+        equality: the ScalarSelect proxies don't compare structurally."""
+        from sqlalchemy.dialects import sqlite
+
+        from src.domain.sorting import staff_specialty_aggregate
+
+        spec = _STAFF_SORT_KEYS["specialty"]
+        assert spec.policy == "always_nulls_last"
+        assert len(spec.expressions) == 1
+        in_map = str(spec.expressions[0].compile(dialect=sqlite.dialect()))
+        shared = str(staff_specialty_aggregate().compile(dialect=sqlite.dialect()))
+        assert in_map == shared

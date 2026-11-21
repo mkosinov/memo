@@ -17,6 +17,7 @@ import {
   mockPositionMaster,
   mockPositionAdmin,
   mockPositionSmm,
+  mockSpecialties,
   createMockStaffResponse,
 } from './helpers/mockData';
 import type { StaffResponse } from '@memo/api-client';
@@ -32,6 +33,7 @@ function setup(overrides: { staff?: StaffResponse | null; mode?: 'create' | 'edi
       mode={overrides.mode ?? 'create'}
       staff={overrides.staff ?? null}
       positions={POSITIONS}
+      specialties={mockSpecialties}
       onSubmit={onSubmit}
       onClose={vi.fn()}
       title="Новый сотрудник"
@@ -206,6 +208,7 @@ describe('StaffModal phone fields (GH #414)', () => {
         mode="edit"
         staff={ACCOUNTED}
         positions={POSITIONS}
+        specialties={mockSpecialties}
         onSubmit={onSubmit}
         onPatchPhone={onPatchPhone}
         onClose={vi.fn()}
@@ -315,5 +318,76 @@ describe('StaffModal phone fields (GH #414)', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     const data = onSubmit.mock.calls[0][0] as StaffFormData;
     expect(data.create_user).toMatchObject({ phone: '+79990003344' });
+  });
+});
+
+// ─── GH #599: master-section directions — dictionary checkboxes ────────────
+
+describe('StaffModal specialty checkboxes (GH #599)', () => {
+  /** The dictionary checkbox by its fixed fixture id. */
+  function specialtyCheckbox(id: string): HTMLInputElement {
+    return screen.getByTestId(`specialty-checkbox-${id}`) as HTMLInputElement;
+  }
+
+  /** Fill the mandatory person fields, enable the master section, submit. */
+  async function fillEnableMasterAndSubmit() {
+    fireEvent.change(screen.getByLabelText('Имя *'), { target: { value: 'Иван' } });
+    fireEvent.change(screen.getByLabelText('Фамилия *'), { target: { value: 'Петров' } });
+    fireEvent.click(screen.getByTestId('master-section-checkbox'));
+    await submit();
+  }
+
+  beforeEach(() => {
+    // window.confirm guard — the dirty-close prompt must not block tests.
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('edit prefill: checkboxes mirror staff.master.specialty_ids', () => {
+    // createMockStaffResponse seeds master.specialty_ids = ['spec-painting'].
+    setup({ mode: 'edit', staff: createMockStaffResponse() });
+
+    expect(specialtyCheckbox('spec-painting')).toBeChecked();
+    expect(specialtyCheckbox('spec-ceramics')).not.toBeChecked();
+  });
+
+  it('create: master section without a direction → «Обязательное поле», no submit (D5)', async () => {
+    const { onSubmit } = setup();
+
+    await fillEnableMasterAndSubmit();
+
+    expect(screen.getByText('Обязательное поле')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('create: directions checked in non-alphabetical order → payload keeps the click order (display order is the server\'s)', async () => {
+    const { onSubmit } = setup();
+
+    fireEvent.change(screen.getByLabelText('Имя *'), { target: { value: 'Иван' } });
+    fireEvent.change(screen.getByLabelText('Фамилия *'), { target: { value: 'Петров' } });
+    fireEvent.click(screen.getByTestId('master-section-checkbox'));
+    // Spec §7 scenario 2: «Керамика» first, then «Живопись» — the wire keeps
+    // the input order; the alphabetical display string is joined server-side.
+    fireEvent.click(specialtyCheckbox('spec-ceramics'));
+    fireEvent.click(specialtyCheckbox('spec-painting'));
+    await submit();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const data = onSubmit.mock.calls[0][0] as StaffFormData;
+    expect(data.master).toMatchObject({
+      specialty_ids: ['spec-ceramics', 'spec-painting'],
+      color: '#5B8C7A',
+    });
+  });
+
+  it('unchecking down to zero re-raises the D5 required error', async () => {
+    const { onSubmit } = setup({ mode: 'edit', staff: createMockStaffResponse() });
+
+    fireEvent.click(specialtyCheckbox('spec-painting')); // 1 → 0
+    await submit();
+
+    expect(screen.getByText('Обязательное поле')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

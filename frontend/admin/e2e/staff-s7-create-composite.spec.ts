@@ -1,16 +1,22 @@
 /**
  * S7 (GH #266) — «Создание карточки сразу с учёткой и мастером».
  * Extended for #348 S1: the account is born PASSWORDLESS.
+ * Extended for #599 §7.2: the master directions are dictionary CHECKBOXES
+ * (the free-text CSV input is gone); the display string is alphabetical.
  *
  * One create-modal pass fills the person + checks «Сделать мастером»
- * (specialty + color) + checks «Создать учётку» (phone ONLY — the password
- * field is gone since #348 spec §6) and saves. The single POST /api/v1/staff
- * transaction (D8) writes the staff card, the masters extension row, the
- * position links and the passwordless users account; the follow-up
- * POST /users/{id}/password-link issues the one-time setup link and the
- * handover dialog appears (link field + «Скопировать» + «действует до …» +
- * «передайте ссылку сотруднику»); the DB row keeps NO password hash and
- * the raw token only as its SHA-256 digest.
+ * (direction checkboxes + color) + checks «Создать учётку» (phone ONLY —
+ * the password field is gone since #348 spec §6) and saves. The single
+ * POST /api/v1/staff transaction (D8) writes the staff card, the masters
+ * extension row, the position links and the passwordless users account;
+ * the follow-up POST /users/{id}/password-link issues the one-time setup
+ * link and the handover dialog appears (link field + «Скопировать» +
+ * «действует до …» + «передайте ссылку сотруднику»); the DB row keeps NO
+ * password hash and the raw token only as its SHA-256 digest.
+ *
+ * The §7.2 test below keeps its scenario pure (no account): directions
+ * checked NOT in alphabetical order → the card and the table show the
+ * alphabetical string «Живопись, Керамика».
  */
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
@@ -18,12 +24,26 @@ import { request as apiRequest } from '@playwright/test';
 import crypto from 'node:crypto';
 import { cleanup } from './fixtures/factories';
 import { waitForStaffReady } from './fixtures/helpers';
-import { queryDBRow } from './fixtures/db-query';
+import { queryDBRow, queryDBRows } from './fixtures/db-query';
+import { seedId } from './fixtures/seed-ids';
 // The exported expiry formatter — ONE rendering of the dialog's
 // «Действует до …» line, no hand-copied duplicate in this spec.
 import { formatLinkExpiry } from '../app/(main)/staff/components/PasswordLinkDialog';
 
 const BACKEND = resolveBackendUrl();
+
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import (CI's `playwright --list` collects specs before the
+// shard stack seeds the DB). The seed dictionary carries exactly these two
+// directions for staff («Декор» is the free leaf): «Живопись» and
+// «Керамика» — canonical titles, capital first letter.
+let ZHIVOPIS_ID = '';
+let KERAMIKA_ID = '';
+
+test.beforeAll(() => {
+  ZHIVOPIS_ID = seedId('specialties', 'title', 'Живопись');
+  KERAMIKA_ID = seedId('specialties', 'title', 'Керамика');
+});
 
 let phoneCounter = 0;
 /**
@@ -56,9 +76,13 @@ test.describe('S7 — create card with account + master in one scenario', () => 
       // Position checkbox (D4).
       await dialog.locator('[data-testid="position-checkbox-master"]').check();
 
-      // «Сделать мастером» (D6/D5) — specialty + color.
+      // «Сделать мастером» (D6/D5) — directions + color. GH #599: the
+      // free-text CSV input is gone — dictionary CHECKBOXES instead; the
+      // check order is the input order (deliberately NOT alphabetical:
+      // «Керамика» first, then «Живопись» — the §7.2 discriminating input).
       await dialog.locator('[data-testid="master-section-checkbox"]').check();
-      await dialog.locator('input[placeholder="живопись, керамика"]').fill('керамика, живопись');
+      await dialog.locator(`[data-testid="specialty-checkbox-${KERAMIKA_ID}"]`).check();
+      await dialog.locator(`[data-testid="specialty-checkbox-${ZHIVOPIS_ID}"]`).check();
       await dialog.locator('input[placeholder="#5B8C7A"]').fill('#CD5C5C');
 
       // «Создать учётку» (#348: phone ONLY — no password field on the form).
@@ -125,12 +149,30 @@ test.describe('S7 — create card with account + master in one scenario', () => 
       await expect(page.locator(`[data-testid="master-row-${createdId}"]`)).toBeVisible({ timeout: 10_000 });
 
       // VERIFY — the composite write touched all four surfaces.
-      // 1. Person (staff card) with the master section reflected in the response.
-      expect(body.master).toMatchObject({ specialty: 'керамика, живопись', color: '#CD5C5C', archived: false });
+      // 1. Person (staff card) with the master section reflected in the
+      //    response. GH #599: the input traveled as specialty_ids in CHECK
+      //    order («Керамика» first); the answer's display string is the
+      //    ALPHABETICAL joined string (§4.4) with the canonical titles.
+      expect(JSON.parse(create.request().postData() ?? '{}').master.specialty_ids)
+        .toEqual([KERAMIKA_ID, ZHIVOPIS_ID]);
+      expect(body.master).toMatchObject({
+        specialty: 'Живопись, Керамика',
+        color: '#CD5C5C',
+        archived: false,
+      });
+      expect(body.master.specialty_ids.slice().sort()).toEqual(
+        [ZHIVOPIS_ID, KERAMIKA_ID].sort(),
+      );
       expect(body.position_ids).toEqual(['master']);
-      // 2. The masters extension row exists, active.
-      expect(queryDBRow(`SELECT specialty, color, is_active FROM masters WHERE staff_id='${createdId}'`))
-        .toMatchObject({ specialty: 'керамика, живопись', color: '#CD5C5C', is_active: 1 });
+      // 2. The masters extension row exists, active (the directions live in
+      //    staff_specialties now — the masters row carries color only).
+      expect(queryDBRow(`SELECT color, is_active FROM masters WHERE staff_id='${createdId}'`))
+        .toMatchObject({ color: '#CD5C5C', is_active: 1 });
+      expect(
+        queryDBRows(`SELECT specialty_id FROM staff_specialties WHERE staff_id='${createdId}'`)
+          .map((r) => String(r.specialty_id))
+          .sort(),
+      ).toEqual([ZHIVOPIS_ID, KERAMIKA_ID].sort());
       // 3. The position link.
       expect(queryDBRow(`SELECT position_id FROM staff_positions WHERE staff_id='${createdId}' AND position_id='master'`))
         .not.toBeNull();
@@ -174,6 +216,106 @@ test.describe('S7 — create card with account + master in one scenario', () => 
       // CLI runs with foreign_keys=OFF — sweep them explicitly, users-first.
       try { queryDBRow(`DELETE FROM password_setup_tokens WHERE user_id IN (SELECT id FROM users WHERE phone='${phone}')`); } catch { /* best-effort */ }
       try { queryDBRow(`DELETE FROM users WHERE phone='${phone}'`); } catch { /* best-effort */ }
+      if (createdId) await cleanup(request, `/api/v1/staff/${createdId}`);
+    }
+  });
+
+  // ── GH #599 §7 scenario 2 — alphabetical display string ────────────────
+
+  test('§7.2: directions checked NOT in alphabetical order — the card and the table show «Живопись, Керамика»', async ({
+    page,
+    request,
+  }) => {
+    const lastName = `Алфавитова${Date.now()}`;
+    let createdId: string | undefined;
+
+    try {
+      await waitForStaffReady(page);
+      await page.getByText('+ Добавить сотрудника').click();
+
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+      await expect(dialog.getByText('Новый сотрудник')).toBeVisible();
+
+      // Person fields (the create pass of the S7 test above).
+      await dialog.locator('input[placeholder="Иван"]').fill('Вера');
+      await dialog.locator('input[placeholder="Иванов"]').fill(lastName);
+
+      // Master section. INPUT ORDER deliberately NOT alphabetical:
+      // «Керамика» first, THEN «Живопись» (the §7.2 discriminating input —
+      // the check order is what travels to the wire).
+      await dialog.locator('[data-testid="master-section-checkbox"]').check();
+      const created = page.waitForResponse(
+        (r) => r.url().endsWith('/api/v1/staff') && r.request().method() === 'POST',
+      );
+      await dialog.locator(`[data-testid="specialty-checkbox-${KERAMIKA_ID}"]`).check();
+      await dialog.locator(`[data-testid="specialty-checkbox-${ZHIVOPIS_ID}"]`).check();
+      // Color keeps its '#5B8C7A' default — the scenario is about directions.
+      await dialog.getByRole('button', { name: 'Сохранить' }).click();
+
+      const resp = await created;
+      expect(resp.status()).toBe(201);
+      const body = await resp.json();
+      createdId = body.id;
+
+      // CARD (the saved card's data) — the wire carried the CHECK order
+      // (non-alphabetical input, §4.4 hard-replace), the response answers
+      // with the ALPHABETICAL display string of canonical titles.
+      expect(JSON.parse(resp.request().postData() ?? '{}').master.specialty_ids)
+        .toEqual([KERAMIKA_ID, ZHIVOPIS_ID]);
+      expect(body.master).toMatchObject({ specialty: 'Живопись, Керамика' });
+      expect(body.master.specialty_ids.slice().sort()).toEqual(
+        [ZHIVOPIS_ID, KERAMIKA_ID].sort(),
+      );
+
+      // TABLE — the row shows the alphabetical string.
+      const row = page.locator(`[data-testid="master-row-${createdId}"]`);
+      await expect(row).toBeVisible({ timeout: 10_000 });
+      await expect(row).toContainText('Живопись, Керамика');
+      await expect(row).not.toContainText('Керамика, Живопись');
+
+      // CARD (reopened) — the saved set renders as CHECKED checkboxes in
+      // the dictionary's alphabetical list order; no input-order echo.
+      await row.click();
+      const edit = page.getByRole('dialog');
+      await expect(edit.getByText('Редактирование сотрудника')).toBeVisible({
+        timeout: 5_000,
+      });
+      await expect(
+        edit.locator(`[data-testid="specialty-checkbox-${ZHIVOPIS_ID}"]`),
+      ).toBeChecked();
+      await expect(
+        edit.locator(`[data-testid="specialty-checkbox-${KERAMIKA_ID}"]`),
+      ).toBeChecked();
+      // View-only close (nothing dirty — no confirm dialog fires).
+      await page.keyboard.press('Escape');
+      await expect(edit).toHaveCount(0);
+
+      // VERIFY DB — both link rows exist for the card.
+      expect(
+        queryDBRows(`SELECT specialty_id FROM staff_specialties WHERE staff_id='${createdId}'`)
+          .map((r) => String(r.specialty_id))
+          .sort(),
+      ).toEqual([ZHIVOPIS_ID, KERAMIKA_ID].sort());
+
+      // VERIFY SORT (§7 tail) — the staff list ordered by `specialty` sorts
+      // by the DISPLAY string: this card («Живопись, Керамика», Ж…) ranks
+      // BEFORE every «Керамика»-only card (К…), never after them as the
+      // input-order string «Керамика, Живопись» would.
+      const sortedResp = await request.get(
+        `${BACKEND}/api/v1/staff?sort_by=specialty&sort_order=asc&per_page=100`,
+      );
+      expect(sortedResp.ok()).toBeTruthy();
+      const items = ((await sortedResp.json()) as {
+        items: { id: string; master?: { specialty: string } | null }[];
+      }).items;
+      const myIdx = items.findIndex((s) => s.id === createdId);
+      expect(myIdx).toBeGreaterThanOrEqual(0);
+      const kIdx = items.findIndex((s) => s.master?.specialty === 'Керамика');
+      expect(kIdx, 'sorted-by-specialty: a seed «Керамика» card must be on the page')
+        .toBeGreaterThanOrEqual(0);
+      expect(myIdx).toBeLessThan(kIdx);
+    } finally {
       if (createdId) await cleanup(request, `/api/v1/staff/${createdId}`);
     }
   });

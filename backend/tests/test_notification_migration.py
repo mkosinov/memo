@@ -684,7 +684,12 @@ class TestOrmParity:
     def test_metadata_matches_migrated_schema(self, upgraded_url: str) -> None:
         """Every Base.metadata table exists after upgrade head with exactly
         the declared column names — the model side of the no-drift contract
-        (sqlite_where partial index is covered by the sqlite_master test)."""
+        (sqlite_where partial index is covered by the sqlite_master test).
+
+        Exact both ways — since GH #599 Task 3 the Service ORM model maps
+        ``specialty_id`` and R2 dropped the legacy ``specialty`` column,
+        so no transition-window whitelist remains.
+        """
         engine = _engine(upgraded_url)
         try:
             inspector = sa.inspect(engine)
@@ -695,10 +700,12 @@ class TestOrmParity:
                 )
                 reflected = {c["name"] for c in inspector.get_columns(table.name)}
                 declared = {c.name for c in table.columns}
-                assert reflected == declared, (
+                extra_db = reflected - declared
+                extra_model = declared - reflected
+                assert not extra_db and not extra_model, (
                     f"{table.name}: migration/model column drift —"
-                    f" only-in-db={sorted(reflected - declared)},"
-                    f" only-in-model={sorted(declared - reflected)}"
+                    f" only-in-db={sorted(extra_db)},"
+                    f" only-in-model={sorted(extra_model)}"
                 )
         finally:
             engine.dispose()

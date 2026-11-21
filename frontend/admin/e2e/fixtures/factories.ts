@@ -188,12 +188,52 @@ export interface StaffOverrides {
   last_name?: string;
   avatar_url?: string | null;
   sort_order?: number;
-  /** Master section (D5): present → the card is an acting schedule master. */
-  master?: { specialty: string; color: string } | null;
+  /** Master section (D5): present → the card is an acting schedule master.
+   *  GH #599: the wire speaks `specialty_ids` (dictionary UUIDs); the legacy
+   *  `specialty` title string (single or CSV, case-insensitive) resolves
+   *  through the dictionary, and an unknown title is CREATED there first
+   *  (see resolveSpecialtyIds) — legacy call shapes keep working. */
+  master?: { specialty?: string; specialty_ids?: string[]; color: string } | null;
   /** Position ids (M2M staff_positions); seed dictionary: master/admin/smm. */
   positions?: string[];
   /** Account checkbox (D6, create-only): phone + password, or `false`. */
   user?: { phone: string; password: string } | false;
+}
+
+/**
+ * GH #599: resolve specialty TITLES into dictionary ids via the bare
+ * /specialties/all list (fixed server order title ASC). Case-insensitive
+ * (the reference-loader contract); an unknown title is CREATED in the
+ * dictionary first (POST /api/v1/specialties — legacy fixture titles like
+ * «тест-специальность» keep working; the per-test seed reset wipes the
+ * entry with the rest of the table, so nothing accumulates).
+ */
+async function resolveSpecialtyIds(
+  api: APIRequestContext,
+  titles: string[],
+): Promise<string[]> {
+  const resp = await api.get(`${BACKEND}/api/v1/specialties/all`);
+  expect(resp.ok(), "resolveSpecialtyIds: GET /specialties/all").toBeTruthy();
+  const all = (await resp.json()) as { id: string; title: string }[];
+  const byLower = new Map(all.map((s) => [s.title.toLowerCase(), s.id]));
+  const ids: string[] = [];
+  for (const title of titles) {
+    const trimmed = title.trim();
+    const existing = byLower.get(trimmed.toLowerCase());
+    if (existing) {
+      ids.push(existing);
+      continue;
+    }
+    const created = await api.post(`${BACKEND}/api/v1/specialties`, {
+      data: { title: trimmed },
+    });
+    expect(
+      created.ok(),
+      `resolveSpecialtyIds: create specialty «${trimmed}» via POST /specialties`,
+    ).toBeTruthy();
+    ids.push(((await created.json()) as { id: string }).id);
+  }
+  return ids;
 }
 
 /**
@@ -233,13 +273,30 @@ export async function createTestStaff(
   const userWire = user
     ? { phone: user.phone }
     : false;
+  // GH #599: the master section wire carries `specialty_ids` (hard-replace
+  // M2M). Explicit ids pass through; the legacy `specialty` title(s) —
+  // single or CSV, e.g. "живопись, керамика" — resolve through the
+  // dictionary (case-insensitive). Absent both → the seed default
+  // «керамика» (the pre-#599 factory default title).
+  let masterWire: { specialty_ids: string[]; color: string } | null = null;
+  if (master) {
+    let ids = master.specialty_ids;
+    if (!ids) {
+      const titles = (master.specialty ?? "керамика")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      ids = await resolveSpecialtyIds(api, titles);
+    }
+    masterWire = { specialty_ids: ids, color: master.color };
+  }
   const resp = await api.post(`${BACKEND}/api/v1/staff`, {
     data: {
       first_name,
       last_name,
       avatar_url,
       sort_order,
-      master,
+      master: masterWire,
       position_ids: positions,
       create_user: userWire,
     },
@@ -302,26 +359,36 @@ export async function createTestLocation(
   return await resp.json();
 }
 
-/** Create a test service via backend API (no tags/tariffs → zero deps). */
+/** Create a test service via backend API (no tags/tariffs → zero deps).
+ *  GH #599: the wire requires the dictionary FK `specialty_id`. An explicit
+ *  `specialty_id` override passes through; the legacy `specialty` title
+ *  override (string, case-insensitive) — and the pre-#599 default
+ *  «керамика» — resolve through /specialties/all. */
 export async function createTestService(
   api: APIRequestContext,
   overrides?: Record<string, unknown>,
 ) {
-  const resp = await api.post(`${BACKEND}/api/v1/services`, {
-    data: {
-      title: `Услуга ${uid()}`,
-      description: "e2e seed service",
-      image_url: "",
-      specialty: "керамика",
-      min_age: 5,
-      max_age: null,
-      duration: 90,
-      record_info: "e2e seed",
-      tariffs: [],
-      tag_ids: [],
-      ...overrides,
-    },
-  });
+  const { specialty: legacyTitle, ...rest } = overrides ?? {};
+  const data: Record<string, unknown> = {
+    title: `Услуга ${uid()}`,
+    description: "e2e seed service",
+    image_url: "",
+    min_age: 5,
+    max_age: null,
+    duration: 90,
+    record_info: "e2e seed",
+    tariffs: [],
+    tag_ids: [],
+    ...rest,
+  };
+  if (!("specialty_id" in data)) {
+    [data.specialty_id] = await resolveSpecialtyIds(api, [
+      typeof legacyTitle === "string" && legacyTitle !== ""
+        ? legacyTitle
+        : "керамика",
+    ]);
+  }
+  const resp = await api.post(`${BACKEND}/api/v1/services`, { data });
   expect(resp.ok()).toBeTruthy();
   return await resp.json();
 }

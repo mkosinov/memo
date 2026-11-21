@@ -47,11 +47,12 @@ SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 # list, records view, masters, photos) and the client-cabinet reads
 # GET /api/v1/my/{records,photos,payments} (#513 — PaginationParams
 # brick as-is) + GET /api/v1/public/photos (#493) + GET
-# /api/v1/public/activities (#600 — the public schedule brick). A new
-# paginated list changes the count: extend the pin CONSCIOUSLY, with
-# the ``id`` contract in place (the missing-``id`` check below fails
-# first if not).
-EXPECTED_PAGINATED_LISTS = 21
+# /api/v1/public/activities (#600 — the public schedule brick) + GET
+# /api/v1/specialties (#599 Task 1 — the dictionary brick, no sort_by).
+# A new paginated list changes the count: extend the pin CONSCIOUSLY,
+# with the ``id`` contract in place (the missing-``id`` check below
+# fails first if not).
+EXPECTED_PAGINATED_LISTS = 22
 
 # Spec §4.4: deleted shapes — zero occurrences allowed anywhere in
 # src (code, comments, docstrings).

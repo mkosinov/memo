@@ -626,6 +626,27 @@ export async function waitForMaterialsReady(page: Page) {
 }
 
 /**
+ * Wait for the specialties dictionary view to load with table (GH #599).
+ * Navigates to /services, switches to the «Направления» tab view via its
+ * data-testid (the h1 heading flips to "Управление направлениями" — assert
+ * THAT so a stale tab switch can't pass, the waitForMaterialsReady
+ * precedent), then waits for the table.
+ */
+export async function waitForSpecialtiesReady(page: Page) {
+  const specialtiesResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/specialties') && resp.status() === 200,
+    { timeout: 60_000 },
+  );
+  await page.goto('/services');
+  await page.waitForSelector('h1:has-text("Управление услугами")', { timeout: 60_000 });
+  await page.locator('[data-testid="specialties-tab"]').click();
+  await page.waitForSelector('h1:has-text("Управление направлениями")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
+  await specialtiesResponse.catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+/**
  * Open the row action dropdown (⋯ button) for a given row.
  * Row locators: [data-testid="master-row-{id}"], [data-testid="location-row-{id}"]
  * (Masters/locations carry row test IDs; clients/materials rows are looked

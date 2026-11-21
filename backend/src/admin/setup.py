@@ -60,13 +60,17 @@ type _AdminAttr = InstrumentedAttribute[Any]
 
 
 class StaffAdmin(ModelView, model=Staff):
-    """Staff card view (GH #266): the employee directory row + the master
-    schedule-extension (specialty/color/is_active) edited INLINE — the
-    extension is 1:0..1 and never exists without its card."""
+    """Staff card view (GH #266): the employee directory row + the
+    master schedule extension (color/is_active — viewable via the
+    ``master`` relationship select; sqladmin 0.26 has NO ``inline_models``
+    support, the former inline attr was dead config, removed GH #599
+    Task 5).
 
-    # The extension relationship is declared on Staff.master — inline_models
-    # accepts the relationship attribute for a ModelView on the parent.
-    inline_models: ClassVar[list[_AdminAttr]] = [Staff.master]
+    The master-section DIRECTION SET edits here on the id-набор: the
+    M2M ``Staff.specialties`` renders as the automatic multi-select
+    field (the positions mirror — GH #599 Task 4 added the
+    relationship)."""
+
     column_list: ClassVar[Sequence[_AdminAttr]] = [
         Staff.id,
         Staff.first_name,
@@ -211,10 +215,14 @@ class LocationAdmin(ModelView, model=Location):
 
 
 class ServiceAdmin(ModelView, model=Service):
-    column_list: ClassVar[Sequence[_AdminAttr]] = [
+    # GH #599 R2: the free-text column is gone — the direction renders
+    # through the ``specialty_ref`` relationship (sqladmin resolves
+    # dotted attribute paths; the async lazy-load fallback is built in).
+    # The one list that mixes a string path: typed accordingly.
+    column_list: ClassVar[Sequence[_AdminAttr | str]] = [
         Service.id,
         Service.title,
-        Service.specialty,
+        "specialty_ref.title",
         Service.duration,
         Service.min_age,
         Service.max_age,

@@ -28,6 +28,7 @@ from src.models.position import Position, staff_positions
 from src.models.record import Record
 from src.models.service import Service
 from src.models.service_material import ServiceMaterial
+from src.models.specialty import Specialty, staff_specialties
 from src.models.staff import Staff
 from src.models.tag import (
     Tag,
@@ -72,6 +73,7 @@ __all__ = [
     "RecordStatus",
     "Service",
     "ServiceMaterial",
+    "Specialty",
     "Staff",
     "Tag",
     "Tariff",
@@ -89,5 +91,6 @@ __all__ = [
     "record_tags",
     "service_tags",
     "staff_positions",
+    "staff_specialties",
     "visitor_tags",
 ]

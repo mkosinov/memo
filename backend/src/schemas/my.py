@@ -5,8 +5,9 @@ staff-branch ``PUT`` and the base of ``MyStaffProfileResponse``
 (#584 §4.3 mounted the surface under ``/api/v1/my/{master|admin}``):
 
 * public half from the staff card (``first_name``/``last_name``/
-  ``avatar_url``) and the master-section CSV (``specialties`` as an
-  array for display);
+  ``avatar_url``) and the master section's linked directions
+  (``specialties`` — the ``staff_specialties`` titles, alphabetical,
+  GH #599; the response form is unchanged from the CSV era);
 * private half from the lazily created ``user_profiles`` row (spec §3.1).
 
 PUT semantics (domain-rules/profile.md): an **omitted** key keeps its
@@ -55,6 +56,7 @@ class MyProfileResponse(BaseModel):
     has_master: bool
     # Public half — the linked staff card / master section; null when
     # has_staff/has_master is false (archived card = no staff for /my).
+    # GH #599: the titles of the ``staff_specialties`` links, alphabetical.
     first_name: str | None = None
     last_name: str | None = None
     avatar_url: str | None = None

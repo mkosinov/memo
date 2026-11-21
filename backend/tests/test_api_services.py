@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import event
 
 from tests.conftest import query_db
 
@@ -12,12 +13,35 @@ SERVICE_PAYLOAD = {
     "title": "Oil Painting for Beginners",
     "description": "Learn the basics of oil painting",
     "image_url": "https://example.com/oil-painting.jpg",
-    "specialty": "oil",
+    # GH #599: ``specialty_id`` is injected per test by the autouse
+    # ``_service_payload_specialty`` fixture (one dictionary row per
+    # test — the direction is a reference now, not free text).
     "min_age": 12,
     "max_age": 99,
     "duration": 90,
     "record_info": "Bring your own apron",
 }
+
+
+@pytest.fixture(autouse=True)
+def _service_payload_specialty(request):
+    """GH #599: give the shared payload a valid direction reference.
+
+    Creates one «Живопись» dictionary row per test and injects its id
+    into ``SERVICE_PAYLOAD``; tests asserting the display string expect
+    ``"Живопись"`` (the linked title).
+    """
+    if "pure_unit" in request.keywords:
+        # pure_unit tests skip reset_db (no truncate) — pulling api_client
+        # in here would leak the admin row into the NEXT pure test's
+        # skipped truncate (users.phone UNIQUE). Pure tests never touch
+        # the payload.
+        return
+    api_client = request.getfixturevalue("api_client")
+    resp = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    assert resp.status_code == 201, resp.text
+    SERVICE_PAYLOAD.pop("specialty", None)
+    SERVICE_PAYLOAD["specialty_id"] = resp.json()["id"]
 
 TAG_PAYLOAD = {"title": "beginner"}
 
@@ -121,7 +145,7 @@ class TestServicesCrud:
         body = response.json()
         assert body["title"] == "Oil Painting for Beginners"
         assert body["description"] == "Learn the basics of oil painting"
-        assert body["specialty"] == "oil"
+        assert body["specialty"] == "Живопись"
         assert body["min_age"] == 12
         assert body["max_age"] == 99
         assert body["duration"] == 90
@@ -244,7 +268,7 @@ class TestServicesCrud:
             "title": "Advanced Oil Painting",
             "description": "Master oil painting techniques",
             "image_url": "https://example.com/advanced-oil.jpg",
-            "specialty": "oil",
+            "specialty_id": SERVICE_PAYLOAD["specialty_id"],
             "min_age": 18,
             "max_age": 99,
             "duration": 120,
@@ -385,7 +409,7 @@ class TestServicePatch:
         create = api_client.post("/api/v1/services", json={
             "title": "Service", "description": "desc",
             "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
+            "specialty_id": SERVICE_PAYLOAD["specialty_id"], "min_age": 6, "max_age": 99,
             "duration": 90, "record_info": "info",
             "tag_ids": [tag1["id"], tag2["id"]],
         })
@@ -407,7 +431,7 @@ class TestServicePatch:
         create = api_client.post("/api/v1/services", json={
             "title": "Service", "description": "desc",
             "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
+            "specialty_id": SERVICE_PAYLOAD["specialty_id"], "min_age": 6, "max_age": 99,
             "duration": 90, "record_info": "info",
             "tag_ids": [tag1["id"]],
         })
@@ -426,7 +450,7 @@ class TestServicePatch:
         create = api_client.post("/api/v1/services", json={
             "title": "Service", "description": "desc",
             "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
+            "specialty_id": SERVICE_PAYLOAD["specialty_id"], "min_age": 6, "max_age": 99,
             "duration": 90, "record_info": "info",
             "tag_ids": [tag1["id"]],
         })
@@ -1691,3 +1715,212 @@ class TestServiceListSorting:
         assert resp.status_code == 200
         titles = [s["title"] for s in resp.json()["items"]]
         assert titles == ["Apple", "Banana"]  # title ASC, not insertion order
+
+    def test_sort_specialty_by_dictionary_title_asc_desc(
+        self, api_client, create_service
+    ) -> None:
+        """GH #599 R2: sort_by=specialty orders by the LINKED dictionary
+        title (JOIN ``Specialty.title``, spec §4.5) — the legacy free-text
+        column is gone; service titles deliberately differ from specialty
+        titles so a wrong key (services.title) cannot pass."""
+        spec_v = _make_specialty(api_client, "Витраж")
+        spec_a = _make_specialty(api_client, "Аэрография")
+        spec_g = _make_specialty(api_client, "Гончарное дело")
+        s_v = create_service(title="Zebra", specialty_id=spec_v["id"])
+        s_a = create_service(title="Apple", specialty_id=spec_a["id"])
+        s_g = create_service(title="Moon", specialty_id=spec_g["id"])
+
+        # UTF-8 binary collation of the Cyrillic initials:
+        # А(0410) < В(0412) < Г(0413).
+        asc = self._ids(api_client.get("/api/v1/services?sort_by=specialty&sort_order=asc"))
+        assert asc.index(s_a["id"]) < asc.index(s_v["id"]) < asc.index(s_g["id"])
+
+        desc = self._ids(api_client.get("/api/v1/services?sort_by=specialty&sort_order=desc"))
+        assert desc.index(s_g["id"]) < desc.index(s_v["id"]) < desc.index(s_a["id"])
+
+
+# ─── GH #599 R2: specialty_id contract (Task 3, spec §4.3) ─────────────────────
+
+
+def _make_specialty(api_client, title: str = "Живопись") -> dict:
+    """Find-or-create a specialty dictionary row (the title is unique
+    case-insensitively — the module's autouse fixture may have seeded
+    «Живопись» already)."""
+    resp = api_client.post("/api/v1/specialties", json={"title": title})
+    if resp.status_code == 409:
+        listed = api_client.get("/api/v1/specialties/all")
+        return next(r for r in listed.json() if r["title"].lower() == title.lower())
+    assert resp.status_code == 201, f"specialty create failed: {resp.text}"
+    return resp.json()
+
+
+class TestServiceSpecialtyDictionary:
+    """``specialty_id`` replaces the free-text ``specialty`` (GH #599 §4.3).
+
+    * Create/PUT carry a REQUIRED ``specialty_id: UUID``; unknown id → 422
+      (explicit prevalidation, the materials #223 pattern — not a raw FK 500).
+    * PATCH: absent → preserve the current direction; EXPLICIT ``null`` →
+      422 (the field cannot be blanked — NOT NULL FK).
+    * Responses keep the display string ``specialty: str`` (the linked
+      dictionary title, read-only) and add ``specialty_id``.
+    """
+
+    def test_create_with_valid_specialty_id_round_trip(self, api_client) -> None:
+        spec = _make_specialty(api_client, "Живопись")
+        resp = api_client.post(
+            "/api/v1/services", json={**SERVICE_PAYLOAD, "specialty_id": spec["id"]}
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["specialty_id"] == spec["id"]
+        assert body["specialty"] == "Живопись"  # display string from the link
+
+    def test_create_missing_specialty_id_422(self, api_client) -> None:
+        payload = {k: v for k, v in SERVICE_PAYLOAD.items() if k != "specialty_id"}
+        resp = api_client.post("/api/v1/services", json=payload)
+        assert resp.status_code == 422, resp.text
+
+    def test_create_unknown_specialty_id_422(self, api_client) -> None:
+        resp = api_client.post(
+            "/api/v1/services",
+            json={**SERVICE_PAYLOAD, "specialty_id": str(uuid4())},
+        )
+        assert resp.status_code == 422, resp.text
+        assert "specialty_id" in resp.json()["detail"]["message"]
+
+    def test_create_legacy_specialty_string_not_accepted(self, api_client) -> None:
+        """The free-text field is retired: a payload with the legacy
+        ``specialty`` key and no ``specialty_id`` → 422 (missing field;
+        the legacy key is ignored — ServiceCreate has no extra=forbid)."""
+        payload = {k: v for k, v in SERVICE_PAYLOAD.items() if k != "specialty_id"}
+        resp = api_client.post("/api/v1/services", json={**payload, "specialty": "oil"})
+        assert resp.status_code == 422, resp.text
+
+    def test_put_unknown_specialty_id_422(self, api_client) -> None:
+        spec = _make_specialty(api_client)
+        created = api_client.post(
+            "/api/v1/services", json={**SERVICE_PAYLOAD, "specialty_id": spec["id"]}
+        )
+        assert created.status_code == 201, created.text
+
+        resp = api_client.put(
+            f"/api/v1/services/{created.json()['id']}",
+            json={**SERVICE_PAYLOAD, "specialty_id": str(uuid4())},
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_patch_absent_specialty_id_preserves_direction(self, api_client) -> None:
+        spec = _make_specialty(api_client, "Керамика")
+        created = api_client.post(
+            "/api/v1/services", json={**SERVICE_PAYLOAD, "specialty_id": spec["id"]}
+        )
+        assert created.status_code == 201, created.text
+        service_id = created.json()["id"]
+
+        resp = api_client.patch(
+            f"/api/v1/services/{service_id}", json={"title": "Renamed"}
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["specialty_id"] == spec["id"]
+        assert body["specialty"] == "Керамика"
+
+    def test_patch_explicit_null_specialty_id_422(self, api_client) -> None:
+        """Explicit ``null`` → 422: обнуление невозможно (NOT NULL FK,
+        spec §4.3) — NOT silently stripped like other NOT NULL scalars."""
+        spec = _make_specialty(api_client)
+        created = api_client.post(
+            "/api/v1/services", json={**SERVICE_PAYLOAD, "specialty_id": spec["id"]}
+        )
+        assert created.status_code == 201, created.text
+
+        resp = api_client.patch(
+            f"/api/v1/services/{created.json()['id']}",
+            json={"specialty_id": None},
+        )
+        assert resp.status_code == 422, resp.text
+        # The stored direction survived the rejected request.
+        got = api_client.get(f"/api/v1/services/{created.json()['id']}")
+        assert got.json()["specialty_id"] == spec["id"]
+
+    def test_patch_valid_specialty_id_moves_service(self, api_client) -> None:
+        spec_from = _make_specialty(api_client, "Живопись")
+        spec_to = _make_specialty(api_client, "Мозаика")
+        created = api_client.post(
+            "/api/v1/services",
+            json={**SERVICE_PAYLOAD, "specialty_id": spec_from["id"]},
+        )
+        assert created.status_code == 201, created.text
+
+        resp = api_client.patch(
+            f"/api/v1/services/{created.json()['id']}",
+            json={"specialty_id": spec_to["id"]},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["specialty_id"] == spec_to["id"]
+        assert body["specialty"] == "Мозаика"
+
+    def test_get_and_all_carry_specialty_display(self, api_client) -> None:
+        """GET /{id} and bare /all both expose ``specialty`` (the linked
+        title) + ``specialty_id`` without extra round-trips."""
+        spec = _make_specialty(api_client, "Батик")
+        created = api_client.post(
+            "/api/v1/services", json={**SERVICE_PAYLOAD, "specialty_id": spec["id"]}
+        )
+        assert created.status_code == 201, created.text
+        service_id = created.json()["id"]
+
+        got = api_client.get(f"/api/v1/services/{service_id}")
+        assert got.status_code == 200
+        assert got.json()["specialty"] == "Батик"
+        assert got.json()["specialty_id"] == spec["id"]
+
+        bare = api_client.get("/api/v1/services/all")
+        assert bare.status_code == 200, bare.text
+        row = next(s for s in bare.json() if s["id"] == service_id)
+        assert row["specialty"] == "Батик"
+
+
+class TestServicesListQueryCount:
+    """N+1 guard (GH #599 §4.3): the specialty display string rides the
+    list statement (JOIN + eager load) — the SELECT count of a services
+    list must NOT grow with the number of rows.
+
+    Mirror of ``test_list_activities_query_count.py``: seed 3 services,
+    measure, add 3 more, measure again — the counts must be EQUAL.
+    """
+
+    def test_list_query_count_constant_across_row_counts(
+        self, api_client, db_engine, create_service
+    ) -> None:
+        counter = {"n": 0}
+
+        def _before(conn, cursor, statement, params, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                counter["n"] += 1
+
+        event.listen(db_engine.sync_engine, "before_cursor_execute", _before)
+        try:
+            for _ in range(3):
+                create_service()
+            counter["n"] = 0  # measure ONLY the list request
+            resp = api_client.get("/api/v1/services?per_page=50")
+            assert resp.status_code == 200, resp.text
+            assert len(resp.json()["items"]) == 3
+            count_three = counter["n"]
+
+            for _ in range(3):
+                create_service()
+            counter["n"] = 0  # measure ONLY the list request
+            resp = api_client.get("/api/v1/services?per_page=50")
+            assert resp.status_code == 200, resp.text
+            assert len(resp.json()["items"]) == 6
+            count_six = counter["n"]
+        finally:
+            event.remove(db_engine.sync_engine, "before_cursor_execute", _before)
+
+        assert count_three == count_six, (
+            "N+1 regression: SELECTs grew with rows "
+            f"({count_three} → {count_six})"
+        )

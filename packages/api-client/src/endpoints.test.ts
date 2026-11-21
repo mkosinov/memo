@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getPublicMasters, getPublicServices, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
+import { getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getPublicMasters, getPublicServices, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, getSpecialties, getAllSpecialties, createSpecialty, patchSpecialty, deleteSpecialty, dryRunDeleteSpecialty, resolveDeleteSpecialty, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, ActivityPublicListResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, LocationPublicListResponseSchema, MasterPublicListResponseSchema, ServicePublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
@@ -89,7 +89,7 @@ describe('createStaff', () => {
     await createStaff({
       first_name: 'Анна',
       last_name: 'Иванова',
-      master: { specialty: 'живопись', color: '#5B8C7A' },
+      master: { specialty_ids: ['5f8a1c2d-000a-4000-8000-00000000000a'], color: '#5B8C7A' },
       position_ids: ['master'],
       // #348: passwordless create — the password is set by the owner via
       // the one-time setup link, never entered by the admin.
@@ -100,7 +100,7 @@ describe('createStaff', () => {
       body: JSON.stringify({
         first_name: 'Анна',
         last_name: 'Иванова',
-        master: { specialty: 'живопись', color: '#5B8C7A' },
+        master: { specialty_ids: ['5f8a1c2d-000a-4000-8000-00000000000a'], color: '#5B8C7A' },
         position_ids: ['master'],
         create_user: { phone: '+79991234567' },
       }),
@@ -114,7 +114,7 @@ describe('updateStaff', () => {
     await updateStaff('st-1', {
       first_name: 'Анна',
       last_name: 'Петрова',
-      master: { specialty: 'керамика', color: '#AABBCC' },
+      master: { specialty_ids: ['5f8a1c2d-000b-4000-8000-00000000000b'], color: '#AABBCC' },
       position_ids: [],
     });
     expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1', expect.anything(), {
@@ -122,7 +122,7 @@ describe('updateStaff', () => {
       body: JSON.stringify({
         first_name: 'Анна',
         last_name: 'Петрова',
-        master: { specialty: 'керамика', color: '#AABBCC' },
+        master: { specialty_ids: ['5f8a1c2d-000b-4000-8000-00000000000b'], color: '#AABBCC' },
         position_ids: [],
       }),
     });
@@ -247,6 +247,55 @@ describe('deletePosition', () => {
     expect(api).toHaveBeenCalledWith('/api/v1/positions/p-1', expect.anything(), {
       method: 'DELETE',
       body: JSON.stringify({ expected: { staff_positions: ['st-1'] } }),
+    });
+  });
+});
+
+// ─── Specialties (GH #599 — studio direction dictionary) ────────────────────
+// Mirror of the positions surface minus the position-only extras: no GET
+// /{id}, no PUT (rename is PATCH), no system rows — and the list has NO
+// sort_by (fixed order title ASC, id ASC server-side).
+
+describe('getSpecialties', () => {
+  it('calls /api/v1/specialties without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getSpecialties();
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties', expect.anything());
+  });
+
+  it('calls /api/v1/specialties with pagination params (no sort_by — fixed order)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 100 });
+    await getSpecialties({ page: 2, per_page: 100 });
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties?page=2&per_page=100', expect.anything());
+  });
+});
+
+describe('getAllSpecialties', () => {
+  it('calls /api/v1/specialties/all (no params — dropdown source, bare array)', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getAllSpecialties();
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties/all', expect.anything());
+  });
+});
+
+describe('createSpecialty', () => {
+  it('calls POST /api/v1/specialties with title', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'sp-1' });
+    await createSpecialty({ title: 'Керамика' });
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties', expect.anything(), {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Керамика' }),
+    });
+  });
+});
+
+describe('patchSpecialty', () => {
+  it('calls PATCH /api/v1/specialties/:id with the rename body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'sp-1' });
+    await patchSpecialty('sp-1', { title: 'Гончарное дело' });
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties/sp-1', expect.anything(), {
+      method: 'PATCH',
+      body: JSON.stringify({ title: 'Гончарное дело' }),
     });
   });
 });
@@ -1501,7 +1550,11 @@ describe('getTags', () => {
 describe('createService', () => {
   it('calls POST /api/v1/services with body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 's-1' });
-    const data: z.input<typeof ServiceCreateSchema> = { title: 'Рисование', duration: 90 };
+    const data: z.input<typeof ServiceCreateSchema> = {
+      title: 'Рисование',
+      duration: 90,
+      specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a', // GH #599: required reference
+    };
     await createService(data);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/services',
@@ -1521,7 +1574,7 @@ describe('updateService', () => {
       title: 'Обновлённое',
       description: '',
       image_url: '',
-      specialty: '',
+      specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a',
       min_age: 0,
       max_age: 18,
       duration: 60,
@@ -2711,6 +2764,94 @@ describe('resolveDeletePosition', () => {
       body: JSON.stringify({
         expected: { staff_positions: ['uuid-staff-1', 'uuid-staff-2'] },
         resolutions: { staff_positions: 'cascade' },
+      }),
+    });
+  });
+});
+
+// ─── Specialties delete (GH #599, mirror of positions GH #324 transport) ────
+// Dependency semantics differ from positions: ``services`` is the VISIBLE
+// BLOCKING node (allowed_actions: [] — occupied by any service incl. archived
+// → 409, never resolvable); ``staff_specialties`` is AUTO-cascade (the
+// materials pattern) — a staff-held direction commits with {"resolutions": {}}
+// and the staff cards survive. A free row is a leaf (commit {expected: {}}).
+
+describe('deleteSpecialty', () => {
+  it('defaults the body to the leaf-clean snapshot {expected: {}} (T6 pattern)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteSpecialty('sp-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties/sp-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('passes an explicit expected payload through', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteSpecialty('sp-1', { expected: { services: ['svc-1'] } });
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties/sp-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { services: ['svc-1'] } }),
+    });
+  });
+});
+
+describe('dryRunDeleteSpecialty', () => {
+  it('calls DELETE /api/v1/specialties/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeleteSpecialty('sp-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/specialties/sp-1?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+
+  it('propagates 409 ApiError with the services dependency tree (blocking node)', async () => {
+    const tree = [
+      {
+        entity: 'services', auto: false, relation: 'Услуга', count: 2,
+        allowed_actions: [], // blocking — no resolution ever offered
+        items: [
+          { id: 'uuid-svc-1', label: 'Мастер-класс по живописи' },
+          { id: 'uuid-svc-2', label: 'Мастер-класс по глине' },
+        ],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeleteSpecialty('sp-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+  });
+});
+
+describe('resolveDeleteSpecialty', () => {
+  it('pure path: body is {"expected": {}} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteSpecialty('sp-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties/sp-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('staff-held path: auto-cascade commit sends both expected {} and resolutions {}', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteSpecialty('sp-1', {
+      resolutions: {}, // staff_specialties is AUTO — the empty map is the whole choice
+      expected: {},
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/specialties/sp-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: {},
+        resolutions: {},
       }),
     });
   });

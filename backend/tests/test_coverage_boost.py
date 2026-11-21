@@ -18,6 +18,20 @@ pytestmark = pytest.mark.integration
 # ─── Record Service: Phone Flow & Visitor Resolution ──────────────────────────
 
 
+
+def _boost_specialty_id(api_client) -> str:
+    """GH #599: the direction row for inline service payloads (created
+    once per caller; a 409 means it already exists in this test)."""
+    resp = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    if resp.status_code == 409:
+        resp = api_client.get("/api/v1/specialties/all")
+        return next(
+            r["id"] for r in resp.json() if r["title"].lower() == "живопись"
+        )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
 class TestRecordPhoneFlow:
     """Test the phone-based record creation flow in RecordService."""
 
@@ -198,7 +212,7 @@ class TestServiceWithTariffsAndTags:
             "title": "Acrylic Painting",
             "description": "Learn acrylic painting",
             "image_url": "https://example.com/acrylic.jpg",
-            "specialty": "painting",
+            "specialty_id": _boost_specialty_id(api_client),
             "min_age": 6,
             "max_age": 99,
             "duration": 120,
@@ -227,7 +241,7 @@ class TestServiceWithTariffsAndTags:
             "title": "Watercolor Art",
             "description": "Watercolor painting class",
             "image_url": "https://example.com/watercolor.jpg",
-            "specialty": "watercolor",
+            "specialty_id": _boost_specialty_id(api_client),
             "min_age": 8,
             "max_age": 99,
             "duration": 90,
@@ -254,7 +268,7 @@ class TestServiceWithTariffsAndTags:
             "title": "Ceramics",
             "description": "Clay sculpting",
             "image_url": "https://example.com/ceramics.jpg",
-            "specialty": "ceramics",
+            "specialty_id": _boost_specialty_id(api_client),
             "min_age": 5,
             "max_age": 99,
             "duration": 60,
@@ -275,7 +289,7 @@ class TestServiceWithTariffsAndTags:
             "title": "Advanced Ceramics",
             "description": "Advanced clay techniques",
             "image_url": "https://example.com/ceramics2.jpg",
-            "specialty": "ceramics",
+            "specialty_id": _boost_specialty_id(api_client),
             "min_age": 12,
             "max_age": 99,
             "duration": 120,
@@ -301,7 +315,7 @@ class TestServiceWithTariffsAndTags:
             "title": "Ceramics",
             "description": "Clay sculpting",
             "image_url": "https://example.com/ceramics.jpg",
-            "specialty": "ceramics",
+            "specialty_id": _boost_specialty_id(api_client),
             "min_age": 5,
             "max_age": 99,
             "duration": 60,
@@ -317,7 +331,7 @@ class TestServiceWithTariffsAndTags:
             "title": "Ceramics",
             "description": "Clay sculpting",
             "image_url": "https://example.com/ceramics.jpg",
-            "specialty": "ceramics",
+            "specialty_id": _boost_specialty_id(api_client),
             "min_age": 5,
             "max_age": 99,
             "duration": 60,
@@ -503,7 +517,7 @@ class TestRepositoryListFilters:
         """GET /api/v1/services returns active services."""
         api_client.post("/api/v1/services", json={
             "title": "Test Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-            "specialty": "test", "min_age": 6, "max_age": 99, "duration": 60, "record_info": "",
+            "specialty_id": _boost_specialty_id(api_client), "min_age": 6, "max_age": 99, "duration": 60, "record_info": "",
         })
         resp = api_client.get("/api/v1/services")
         assert resp.status_code == 200
@@ -650,7 +664,7 @@ def _create_prereqs(api_client) -> dict:
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Test Svc", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "test", "min_age": 6, "max_age": 99, "duration": 60, "record_info": "",
+        "specialty_id": _boost_specialty_id(api_client), "min_age": 6, "max_age": 99, "duration": 60, "record_info": "",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Test Loc", "address": "123 Main", "capacity": 20,

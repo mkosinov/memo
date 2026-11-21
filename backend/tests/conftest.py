@@ -124,6 +124,77 @@ ADMIN_PHONE = "+79990000001"
 ADMIN_PASSWORD = "admin12345"
 
 
+class _LegacySpecialtySectionAdapter:
+    """GH #599 Task 4 test adapter over the authenticated TestClient.
+
+    Legacy staff master-section payloads carrying ``specialty`` (a title
+    or CSV of titles) are translated to ``specialty_ids`` — find-or-create
+    against ``/api/v1/specialties`` (the ``SeedLoader._specialty_id``
+    precedent from the services side). Payloads already on the new
+    contract (``specialty_ids``) pass through UNTOUCHED — the dedicated
+    new-contract tests exercise the raw API. Per-test instance: the
+    title→id cache dies with the client (reset_db truncates between
+    tests — a cross-test cache would hold stale ids).
+    """
+
+    def __init__(self, client: TestClient) -> None:
+        self._client = client
+        self._by_title: dict[str, str] = {}
+
+    def _id_for(self, title: str) -> str:
+        key = title.strip().lower()
+        if key not in self._by_title:
+            listed = self._client.get("/api/v1/specialties/all")
+            assert listed.status_code == 200, listed.text
+            for row in listed.json():
+                self._by_title.setdefault(row["title"].lower(), row["id"])
+        if key not in self._by_title:
+            created = self._client.post(
+                "/api/v1/specialties", json={"title": title.strip()}
+            )
+            assert created.status_code == 201, created.text
+            self._by_title[key] = created.json()["id"]
+        return self._by_title[key]
+
+    def _translate(self, url: str, json_body: object) -> object:
+        if not (
+            isinstance(json_body, dict)
+            and url.startswith("/api/v1/staff")
+            and isinstance(json_body.get("master"), dict)
+        ):
+            return json_body
+        section = json_body["master"]
+        if "specialty" in section and "specialty_ids" not in section:
+            # Copy-on-translate: the caller's dicts are often SHARED
+            # module-level constants (``MASTER_SECTION``) — in-place
+            # mutation would leak stale ids into later tests.
+            section = dict(section)
+            titles = str(section.pop("specialty")).split(",")
+            section["specialty_ids"] = [
+                self._id_for(t) for t in (title.strip() for title in titles) if t
+            ]
+            json_body = {**json_body, "master": section}
+        return json_body
+
+    def post(self, url: str, **kwargs: object):
+        if "json" in kwargs:
+            kwargs["json"] = self._translate(url, kwargs["json"])
+        return self._client.post(url, **kwargs)  # type: ignore[arg-type]
+
+    def put(self, url: str, **kwargs: object):
+        if "json" in kwargs:
+            kwargs["json"] = self._translate(url, kwargs["json"])
+        return self._client.put(url, **kwargs)  # type: ignore[arg-type]
+
+    def patch(self, url: str, **kwargs: object):
+        if "json" in kwargs:
+            kwargs["json"] = self._translate(url, kwargs["json"])
+        return self._client.patch(url, **kwargs)  # type: ignore[arg-type]
+
+    def __getattr__(self, name: str):
+        return getattr(self._client, name)
+
+
 @pytest.fixture
 def api_client(app, db_engine, _admin_hash):
     """Function-scoped TestClient, pre-authenticated as the fixture admin.
@@ -134,6 +205,11 @@ def api_client(app, db_engine, _admin_hash):
     scope), then this fixture direct-INSERTs the admin user and logs in
     via ``POST /api/v1/auth/login`` — the yielded client's cookie jar
     holds the admin ``memo_staff_session`` for the whole test.
+
+    GH #599: the yielded client WRAPS the raw TestClient in the legacy
+    specialty-section adapter — old ``master={"specialty": ...}``
+    payloads keep working across the suite; every non-staff call and
+    every new-contract payload is untouched.
 
     Routers are still open, so existing tests notice only the extra users
     row. The ~20–40 ms per-test login cost is reviewer-verified
@@ -156,7 +232,7 @@ def api_client(app, db_engine, _admin_hash):
         json={"phone": ADMIN_PHONE, "password": ADMIN_PASSWORD},
     )
     assert resp.status_code == 200, f"api_client admin login failed: {resp.text}"
-    yield c
+    yield _LegacySpecialtySectionAdapter(c)
 
 
 # ─── Database Reset ─────────────────────────────────────────────────────────────
@@ -319,13 +395,58 @@ def create_staff(api_client):
 
 
 @pytest.fixture
-def create_service(api_client):
+def create_specialty(api_client):
+    """Factory: creates a specialty dictionary row via API (GH #599).
+
+    Usage::
+
+        spec = create_specialty()
+        spec = create_specialty(title="Керамика")
+    """
+    _counter = 0
+
+    def factory(title: str | None = None) -> dict:
+        nonlocal _counter
+        _counter += 1
+        payload = {"title": title or f"Направление {_counter}"}
+        resp = api_client.post("/api/v1/specialties", json=payload)
+        assert resp.status_code == 201, (
+            f"create_specialty failed: {resp.status_code}: {resp.text}"
+        )
+        return resp.json()
+
+    return factory
+
+
+@pytest.fixture
+def default_specialty(api_client, create_specialty):
+    """One default direction («Живопись») per test — the ``specialty_id``
+    source for service payloads that don't care about the direction
+    (GH #599: services reference the dictionary by id, not free text).
+
+    Find-or-create: suites often seed their own «Живопись» row first
+    (the title is unique case-insensitively — a blind POST would 409).
+    """
+    listed = api_client.get("/api/v1/specialties/all")
+    assert listed.status_code == 200, listed.text
+    for row in listed.json():
+        if row["title"].lower() == "живопись":
+            return row
+    return create_specialty("Живопись")
+
+
+@pytest.fixture
+def create_service(api_client, default_specialty):
     """Factory: creates a service via API.
 
     Usage::
 
         service = create_service()
         service = create_service(title="Картина маслом", duration=150)
+        service = create_service(specialty_id=other_specialty["id"])
+
+    GH #599: the direction rides ``specialty_id`` (the shared
+    ``default_specialty`` row unless overridden).
     """
     _counter = 0
 
@@ -336,7 +457,7 @@ def create_service(api_client):
             "title": f"Test Service {_counter}",
             "description": "Test service description",
             "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись",
+            "specialty_id": default_specialty["id"],
             "min_age": 6,
             "max_age": 99,
             "duration": 90,
@@ -799,7 +920,7 @@ async def db_session(db_engine):
 
 
 @pytest.fixture
-async def sample_record(api_client, db_session):
+async def sample_record(api_client, db_session, default_specialty):
     """Create a Record with 2 named visits + 1 anonymous visit (visitor_id NULL),
     return ORM object. Same "3 seats" shape as the pre-#257 fixture
     (2 visits + anonym_visits=1), but in the unified visitor model.
@@ -817,7 +938,7 @@ async def sample_record(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Rec Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Rec Studio", "address": "Rec Address", "capacity": 20,
@@ -864,7 +985,7 @@ async def sample_record(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_record_with_visits(api_client, db_session):
+async def sample_record_with_visits(api_client, db_session, default_specialty):
     """Create a Record with active visits having different statuses.
 
     Creates 2 visits: one 'visited', one 'waiting'.
@@ -881,7 +1002,7 @@ async def sample_record_with_visits(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "St Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "St Studio", "address": "St Address", "capacity": 20,
@@ -914,7 +1035,7 @@ async def sample_record_with_visits(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_activity_with_capacity(api_client, db_session):
+async def sample_activity_with_capacity(api_client, db_session, default_specialty):
     """Create an Activity with capacity=10, no records. Capacity check should pass."""
     from datetime import UTC, datetime, timedelta
 
@@ -926,7 +1047,7 @@ async def sample_activity_with_capacity(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Cap Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Cap Studio", "address": "Cap Address", "capacity": 20,
@@ -945,7 +1066,7 @@ async def sample_activity_with_capacity(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_activity_at_capacity(api_client, db_session):
+async def sample_activity_at_capacity(api_client, db_session, default_specialty):
     """Create an Activity (capacity=1) with a record using all seats.
 
     Then check_activity_capacity(seats=1) should raise 409.
@@ -961,7 +1082,7 @@ async def sample_activity_at_capacity(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Full Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Full Studio", "address": "Full Address", "capacity": 20,
@@ -993,11 +1114,12 @@ async def sample_activity_at_capacity(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_activity_zero_capacity(api_client, db_session):
+async def sample_activity_zero_capacity(api_client, db_session, default_specialty):
     """Create an Activity with capacity=0 and NO records (GH #551, US-1:
     «0 = запись закрыта» — booking is closed even with zero occupied seats).
 
     Then check_activity_capacity(seats=1) should raise 409 instantly.
+    GH #599 post-merge: service post switched to ``specialty_id`` FK.
     """
     from datetime import UTC, datetime, timedelta
 
@@ -1009,7 +1131,7 @@ async def sample_activity_zero_capacity(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Zero Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Zero Studio", "address": "Zero Address", "capacity": 20,
@@ -1028,7 +1150,7 @@ async def sample_activity_zero_capacity(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_visit(api_client, db_session):
+async def sample_visit(api_client, db_session, default_specialty):
     """Create a single active Visit ORM object with its parent Record + Activity.
 
     Returns the Visit ORM object (not a dict). Used by VisitService CRUD tests.
@@ -1044,7 +1166,7 @@ async def sample_visit(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "V Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "V Studio", "address": "V Address", "capacity": 20,
@@ -1076,7 +1198,7 @@ async def sample_visit(api_client, db_session):
 
 
 @pytest.fixture
-async def sample_visits(api_client, db_session):
+async def sample_visits(api_client, db_session, default_specialty):
     """Create a Record with 3 active Visit ORM objects. Returns list[Visit]."""
     import uuid as _uuid
     from datetime import UTC, datetime, timedelta
@@ -1089,7 +1211,7 @@ async def sample_visits(api_client, db_session):
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Vs Service", "description": "Test", "image_url": "https://example.com/t.jpg",
-        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+        "specialty_id": default_specialty["id"], "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
         "title": "Vs Studio", "address": "Vs Address", "capacity": 20,
@@ -1152,9 +1274,9 @@ def insert_master_user(
     )
     if with_masters_row:
         query_db_params(
-            "INSERT OR IGNORE INTO masters (staff_id, specialty, color, "
+            "INSERT OR IGNORE INTO masters (staff_id, color, "
             "is_active, created_at, updated_at) "
-            "VALUES (:id, 'живопись', '#5B8C7A', 1, "
+            "VALUES (:id, '#5B8C7A', 1, "
             "datetime('now'), datetime('now'))",
             {"id": staff_id},
         )

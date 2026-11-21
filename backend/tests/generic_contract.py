@@ -68,16 +68,20 @@ from src.services.photo import PhotoService
 # delete) переопределяют generic-семантику — покрыты собственными наборами
 # ``tests/services/test_staff_service.py`` / ``test_position_service.py``
 # (HTTP-контракт добавит Task 4: api/v1/staff.py + position.py).
+# GH #599 Task 1: ``SpecialtyService`` (409-гард уникальности lower(title) на
+# create/patch + нормализация) — собственный набор ``test_api_specialties.py``;
+# HTTP-поверхность без GET/{id} и PUT.
 from src.services.position import PositionService
 from src.services.record import RecordService
 from src.services.service import ServiceService, get_service_service
+from src.services.specialty import SpecialtyService
 from src.services.staff import StaffService, get_staff_service
 from src.services.tag import TagService, get_tag_service
 from src.services.visitor import VisitorService, get_visitor_service
 
 GENERIC_CONTRACT_EXCEPTIONS: set[type] = {
     ServiceService, PhotoService, RecordService, ArchiveService,
-    StaffService, PositionService,
+    StaffService, PositionService, SpecialtyService,
 }
 
 
@@ -385,12 +389,13 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
             "title": "T",
             "description": "D",
             "image_url": "http://x",
-            "specialty": "s",
             "min_age": 6,
             "duration": 60,
             "record_info": "ri",
         },
-        fk_map={},
+        # GH #599: the direction reference — one dictionary row per test
+        # via the conftest factory (fk_map fills ``specialty_id``).
+        fk_map={"specialty_id": "create_specialty"},
         not_null_field="title",
         not_null_sentinel="T2",
         nullable_field="max_age",
@@ -401,7 +406,6 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
             "title": "T2",
             "description": "D2",
             "image_url": "http://x2",
-            "specialty": "s2",
             "min_age": 7,
             "duration": 90,
             "record_info": "ri2",

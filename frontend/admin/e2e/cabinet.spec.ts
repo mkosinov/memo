@@ -40,7 +40,7 @@ import {
   E2E_PASSWORD,
 } from './fixtures/factories';
 import { waitForStaffReady } from './fixtures/helpers';
-import { queryDBRow } from './fixtures/db-query';
+import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
 const BACKEND = resolveBackendUrl();
 
@@ -282,11 +282,14 @@ test.describe('S3 — edit name + portrait, specialty read-only', () => {
       const modal = page.locator('[data-testid="mydata-modal"]');
       await expect(page.locator('[data-testid="mydata-form"]')).toBeVisible({ timeout: 15_000 });
 
-      // ── Specialty is READ-ONLY and shows the admin-owned CSV value ────────
+      // ── Specialty is READ-ONLY and shows the master's directions ─────────
+      // GH #599 display contract: the POST below still accepts the legacy
+      // CSV 'живопись, керамика', but the read side renders the normalized
+      // joined string of canonical dictionary titles («, », alphabetical).
       const specInput = page.locator('[data-testid="mydata-specialties"]');
       await expect(specInput).toBeVisible();
       await expect(specInput).toBeDisabled();
-      await expect(specInput).toHaveValue(specialty);
+      await expect(specInput).toHaveValue('Живопись, Керамика');
 
       // ── Edit the public name half ────────────────────────────────────────
       await page.locator('[data-testid="mydata-first_name"]').fill(newFirst);
@@ -324,8 +327,14 @@ test.describe('S3 — edit name + portrait, specialty read-only', () => {
       // ── DB: the card name changed, the specialty is UNCHANGED (admin-owned) ─
       expect(queryDBRow(`SELECT first_name, last_name FROM staff WHERE id='${staff.id}'`))
         .toMatchObject({ first_name: newFirst, last_name: newLast });
-      expect(queryDBRow(`SELECT specialty FROM masters WHERE staff_id='${staff.id}'`))
-        .toMatchObject({ specialty });
+      // GH #599: directions live in the staff_specialties M2M (the masters
+      // row carries color only) — the seeded pair survives the profile save
+      // untouched, joined titles alphabetical.
+      expect(
+        queryDBRows(
+          `SELECT sp.title FROM staff_specialties ss JOIN specialties sp ON sp.id = ss.specialty_id WHERE ss.staff_id='${staff.id}' ORDER BY sp.title`,
+        ).map((r) => String(r.title)),
+      ).toEqual(['Живопись', 'Керамика']);
 
       // ── The portrait file is stored AND publicly served by the backend ────
       const served = await request.get(servedPath);

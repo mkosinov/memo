@@ -31,6 +31,11 @@ const CODE_DEFAULTS: Record<string, string> = {
   // The explanation of the block: a built-in («мастер»/«админ») never deletes;
   // its title stays editable. Surfaced as an error toast.
   POSITION_IS_SYSTEM: 'Встроенная должность не удаляется',
+  // GH #599 — specialties dictionary. The 409 collision copy mirrors the
+  // backend errors.py map («Направление с таким названием уже существует»)
+  // — the case-variant duplicate the user just typed (spec §7 scenario 3).
+  SPECIALTY_NOT_FOUND: 'Не найдено',
+  SPECIALTY_TITLE_TAKEN: 'Направление с таким названием уже существует',
   VALIDATION_ERROR: 'Проверьте правильность заполнения полей',
   INTEGRITY_VIOLATION: 'Нарушение целостности данных',
   INTERNAL_ERROR: 'Ошибка сервера',

@@ -61,7 +61,7 @@ _GUARDED_ENDPOINTS: list[tuple[str, str, str, dict | None]] = [
     }),
     ("services-write", "POST", "/api/v1/services", {
         "title": "Гвард Сервис", "description": "test",
-        "image_url": "https://example.com/g.jpg", "specialty": "живопись",
+        "image_url": "https://example.com/g.jpg",
         "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }),
     ("tags-write", "POST", "/api/v1/tags", {"title": f"guard-{uuid.uuid4().hex[:8]}"}),
@@ -154,10 +154,30 @@ def _cookie_header(client) -> str | None:
     return f"memo_staff_session={token}" if token else None
 
 
+def _guard_specialty_id(api_client) -> str:
+    """Create/fetch the guard suite's direction row (GH #599) — the id
+    source for service payloads."""
+    resp = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
+    if resp.status_code == 409:  # already created within this test
+        resp = api_client.get("/api/v1/specialties/all")
+        # case-insensitive: the section adapter seeds the lowercase variant
+        return next(
+            r["id"] for r in resp.json() if r["title"].lower() == "живопись"
+        )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
 def _fill_activity_body(api_client, label: str, body: dict | None) -> dict | None:
     """Resolve the request body for ``label``; POST /activities needs real
     FK ids (its table entry carries ``None``) — create master/service/
     location via the authenticated client and build the payload."""
+    if label == "services-write":
+        # GH #599: the direction reference is filled at runtime (the
+        # parametrize constant carries no id — the dictionary row is
+        # per-test state).
+        body["specialty_id"] = _guard_specialty_id(api_client)
+        return body
     if label != "activities-write":
         return body
     master = api_client.post("/api/v1/staff", json={
@@ -166,7 +186,8 @@ def _fill_activity_body(api_client, label: str, body: dict | None) -> dict | Non
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Гв Сервис", "description": "t",
-        "image_url": "https://example.com/g.jpg", "specialty": "живопись",
+        "image_url": "https://example.com/g.jpg",
+        "specialty_id": _guard_specialty_id(api_client),
         "min_age": 6, "max_age": 99, "duration": 90, "record_info": "t",
     }).json()
     location = api_client.post("/api/v1/locations", json={

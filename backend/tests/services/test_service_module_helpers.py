@@ -18,10 +18,13 @@ Behavior-for-behavior moves, pinned by these tests:
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from src.models.material import Material
 from src.models.record import Record
 from src.models.service import Service
 from src.models.service_material import ServiceMaterial
+from src.models.specialty import Specialty
 from src.schemas.material import MaterialResponse
 from src.services.activity import ActivityService, sum_active_seats_bulk
 from src.services.material import MaterialService, _attach_counts
@@ -31,6 +34,20 @@ from src.services.material import MaterialService, _attach_counts
 
 
 # ─── №6: sum_active_seats_bulk is a module-level function ───────────────────
+
+
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
 
 
 async def test_sum_active_seats_bulk_as_function(db_session, sample_visits) -> None:
@@ -67,7 +84,7 @@ async def _seed_material_with_services(db_session, *, active: bool) -> MaterialR
         title="S",
         description="d",
         image_url="https://example.com/s.jpg",
-        specialty="x",
+        specialty_id=(await _t3_spec(db_session)).id,
         min_age=1,
         duration=30,
         record_info="r",

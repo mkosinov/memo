@@ -20,7 +20,10 @@ Two halves share this module:
     :class:`BareListLimitExceededError`.
 
   Archive statuses (#267: active/archived/all) are a parameter of BOTH
-  functions.
+  functions. GH #599: ``specialty`` in the view is the DISPLAY STRING —
+  the ``staff_specialties`` titles joined «, » alphabetically (same
+  string the staff card carries; eager-loaded via
+  ``selectinload(Staff.specialties)`` — no N+1).
 
 * WRITES — :class:`MasterService`, the ``masters`` writing owner (GH #326
   Task 2; the module is no longer read-only). Standalone service
@@ -34,6 +37,14 @@ Two halves share this module:
   its working copy until the Task 3 demolition): T8 ``archived`` flag
   handling, the D5 blank-section rule, the D7 activities block
   (``BlockingDepsError``), ``mark_changed`` by fact of change.
+
+  GH #599 Task 4: the section owns the direction SET —
+  ``upsert_extension`` takes ``specialty_ids`` (hard-replace, the
+  ``replace_positions`` pattern: dedup, >50 distinct → 422, unknown id →
+  422, empty set on a live section → 422 ``SPECIALTY_REQUIRED`` — D5
+  unchanged) and rewrites the ``staff_specialties`` links in the same
+  flush; ``remove_extension`` clears the links too («без секции
+  направлений нет»).
 """
 
 from __future__ import annotations
@@ -44,17 +55,21 @@ from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import asc, func, select, update
 from sqlalchemy import delete as sa_delete
+from sqlalchemy.orm import selectinload
 
 from src.domain.deletion import BlockingDepsError
 from src.domain.errors import (
     BareListLimitExceededError,
     ColorRequiredError,
+    SpecialtyNotFoundError,
     SpecialtyRequiredError,
+    SpecialtySetTooLongError,
 )
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
+from src.models.specialty import Specialty, staff_specialties
 from src.models.staff import Staff
 from src.repositories.generic import BaseRepository, get_base_repository
 from src.repositories.search import ids_in_predicate
@@ -69,6 +84,19 @@ if TYPE_CHECKING:
 
     from sqlalchemy import ColumnElement, Select
     from sqlalchemy.ext.asyncio import AsyncSession
+
+
+#: Write-amplification guard for the master-section direction set
+#: (GH #599 §4.4): >50 DISTINCT ids after dedup → 422.
+SPECIALTY_SET_LIMIT = 50
+
+
+def format_specialty_display(specialties: Sequence[Specialty]) -> str:
+    """Linked directions → the display string: titles joined «, »
+    alphabetically (plain codepoint sort — the established pattern; the
+    sort expression ``string_agg(... ORDER BY title)`` builds the same
+    string, SQLite BINARY ordering agrees with Python's)."""
+    return ", ".join(sorted(s.title for s in specialties))
 
 
 @dataclass
@@ -92,7 +120,9 @@ class _MasterViewRow:
             id=staff.id,
             first_name=staff.first_name,
             last_name=staff.last_name,
-            specialty=ext.specialty,
+            # GH #599: the joined display string over the card's links
+            # (eager-loaded — ``_view_stmt`` bakes the selectinload).
+            specialty=format_specialty_display(staff.specialties),
             color=ext.color,
             avatar_url=staff.avatar_url,
             sort_order=staff.sort_order,
@@ -113,8 +143,18 @@ def _view_stmt(
     GH #232 §3.1: ``ids`` narrows by the VIEW identity (``id`` on the
     wire = ``staff_id``) via the shared one-line helper — the scope
     predicate (archive status) stays BEFORE it.
+
+    GH #599: the statement eager-loads the card's specialty links
+    (``selectinload`` — ONE extra query per page, no N+1): the view's
+    ``specialty`` string is the joined titles.
     """
-    stmt = select(Staff, Master).join(Master, Master.staff_id == Staff.id)
+    stmt = (
+        select(Staff, Master)
+        .join(Master, Master.staff_id == Staff.id)
+        # populate_existing: CORE link writes must beat a stale
+        # identity-map ``specialties`` collection.
+        .options(selectinload(Staff.specialties)).execution_options(populate_existing=True)
+    )
     if status is ArchiveStatus.ACTIVE:
         stmt = stmt.where(Master.is_active.is_(True))
     elif status is ArchiveStatus.ARCHIVED:
@@ -235,14 +275,16 @@ async def list_public_masters_view(
 # ─── writes: the ``masters`` owner (scenario building blocks) ───────────────
 
 
-def _require_section_fields(specialty: str, color: str) -> None:
-    """D5: a present master section must carry a non-blank specialty + color.
+def _require_section_fields(specialty_ids: Sequence[str], color: str) -> None:
+    """D5: a present master section must carry a non-empty specialty SET
+    + color (GH #599 §4.4 — the CSV string became the M2M, the invariant
+    is NOT weakened).
 
-    Pydantic already rejects absent keys / empty strings / bad hex; the
-    blank-whitespace case (``"   "``) is domain-level, checked here.
-    Same rule as the ``StaffService`` working copy (Task 3 demolition).
+    Ids are UUID-validated by the schema and their EXISTENCE is checked
+    separately (:meth:`MasterService._validate_specialty_ids`); the
+    blank-whitespace color case stays domain-level, checked here.
     """
-    if not specialty.strip():
+    if not specialty_ids:
         raise SpecialtyRequiredError()
     if not color.strip():
         raise ColorRequiredError()
@@ -259,49 +301,113 @@ class MasterService:
         """Hold the shared ``BaseRepository`` (stateless, any model)."""
         self._repository: BaseRepository = repository
 
+    async def _validate_specialty_ids(
+        self, db_session: AsyncSession, specialty_ids: Sequence[str]
+    ) -> dict[str, str]:
+        """Every sent specialty id must exist (the ``_validate_position_ids``
+        pattern — SPECIALTY_NOT_FOUND else, never a raw FK IntegrityError).
+
+        Returns ``{id: title}`` for the validated set — the writer reuses
+        it to feed the audit-snapshot glue (GH #599 Task 5: one query
+        serves validation AND the journaled display titles).
+        """
+        unique_ids = set(specialty_ids)
+        rows = await db_session.execute(
+            select(Specialty.id, Specialty.title).where(Specialty.id.in_(unique_ids))
+        )
+        found: dict[str, str] = {
+            spec_id: title for spec_id, title in rows.all()
+        }
+        for missing in sorted(unique_ids - found.keys()):
+            raise SpecialtyNotFoundError(missing)
+        return found
+
+    async def _replace_specialty_links(
+        self, db_session: AsyncSession, staff_id: str, specialty_ids: Sequence[str]
+    ) -> None:
+        """Full replace of the section's M2M set (delete-all + insert,
+        same flush — the ``replace_positions`` mirror on the master side).
+
+        Duplicates collapse to one row (composite PK). A replace is a
+        fact → marks ``"staff_specialties"`` (the join-table wire name —
+        consumers skip unknown entity names, the staff_positions
+        precedent).
+        """
+        await db_session.execute(
+            sa_delete(staff_specialties).where(
+                staff_specialties.c.staff_id == staff_id
+            )
+        )
+        for specialty_id in specialty_ids:
+            await db_session.execute(
+                staff_specialties.insert().values(
+                    staff_id=staff_id, specialty_id=specialty_id
+                )
+            )
+        mark_changed("staff_specialties")
+
     async def upsert_extension(
         self,
         db_session: AsyncSession,
         staff_id: str,
-        specialty: str,
+        specialty_ids: Sequence[str],
         color: str,
         archived: bool | None = None,
     ) -> Master:
-        """Create or update the masters extension row for *staff_id*.
+        """Create or update the masters extension row for *staff_id* and
+        hard-replace its specialty link set.
+
+        GH #599 §4.4: ``specialty_ids`` — dedup first, >50 distinct after
+        dedup → 422 (write-amplification guard), unknown id → 422
+        (explicit prevalidation), empty set → ``SPECIALTY_REQUIRED``
+        (D5, non-weakened — an upsert IS a live section).
 
         Today's T8 ``archived`` semantics (moved 1-to-1 from
         ``StaffService._apply_master_section``): ``None`` = don't touch
         the schedule flag (a new row still starts active — the model
         default); a value → ``is_active = not archived``. Archiving NEVER
-        deletes the row (D7 — history keeps specialty/color; removal is
-        the explicit :meth:`remove_extension` path). A written row is a
-        fact → ``mark_changed("masters")`` unconditionally (both branches
-        change the table). Flush, no commit.
+        deletes the row (D7 — history keeps the directions/color;
+        removal is the explicit :meth:`remove_extension` path). A written
+        row is a fact → ``mark_changed("masters")`` unconditionally (both
+        branches change the table). Flush, no commit.
         """
-        _require_section_fields(specialty, color)
+        _require_section_fields(specialty_ids, color)
+        deduped = list(dict.fromkeys(str(sid) for sid in specialty_ids))
+        if len(deduped) > SPECIALTY_SET_LIMIT:
+            raise SpecialtySetTooLongError(SPECIALTY_SET_LIMIT)
+        found_titles = await self._validate_specialty_ids(db_session, deduped)
         ext = (
             await db_session.execute(select(Master).where(Master.staff_id == staff_id))
         ).scalar_one_or_none()
         if ext is None:
             ext = Master(
                 staff_id=staff_id,
-                specialty=specialty.strip(),
                 color=color.strip(),
                 **({"is_active": not archived} if archived is not None else {}),
             )
             db_session.add(ext)
             await db_session.flush()
         else:
-            ext.specialty = specialty.strip()
             ext.color = color.strip()
             if archived is not None:
                 ext.is_active = not archived
+        await self._replace_specialty_links(db_session, staff_id, deduped)
+        # GH #599 Task 5 (spec §4.6): audit-snapshot glue — the journaled
+        # direction display string + id set ride the row as PLAIN
+        # attributes (see ``Master``): the masters signature reads them
+        # without a lazy load; the id rides NEXT to the string, so a
+        # dictionary rename never rewrites a historical row's meaning.
+        ext.specialty = ", ".join(sorted(found_titles.values()))
+        ext.specialty_ids = list(deduped)
         mark_changed("masters")
         return ext
 
     async def remove_extension(self, db_session: AsyncSession, staff_id: str) -> None:
         """Delete the masters extension row (the explicit ``master: null``
-        path), domain-blocked by activities (D7).
+        path), domain-blocked by activities (D7) — and CLEAR the
+        specialty links («без мастер-секции направлений нет», §4.4: the
+        links hang off the card, so they need their own delete next to
+        the row).
 
         No row → no-op (no spurious mark). A row with live activities →
         :class:`BlockingDepsError` (the 422 «archive it instead»
@@ -315,7 +421,13 @@ class MasterService:
             return
         await self._assert_section_removable(db_session, staff_id)
         await db_session.execute(sa_delete(Master).where(Master.staff_id == staff_id))
+        await db_session.execute(
+            sa_delete(staff_specialties).where(
+                staff_specialties.c.staff_id == staff_id
+            )
+        )
         mark_changed("masters")
+        mark_changed("staff_specialties")
 
     async def archive_active_extension(self, db_session: AsyncSession, staff_id: str) -> int:
         """Deactivate the extension — ONLY if currently active.

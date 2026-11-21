@@ -31,6 +31,7 @@ from src.models.location import Location
 from src.models.master import Master
 from src.models.position import Position, staff_positions
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.user import User
 from src.schemas.activity import ActivityCreate
@@ -41,6 +42,20 @@ pytestmark = pytest.mark.asyncio
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
+
+
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
 
 
 async def _add_position(db_session: Any, **kwargs: Any) -> Position:
@@ -60,7 +75,9 @@ async def _add_staff(db_session: Any, **kwargs: Any) -> Staff:
 
 
 async def _add_master_ext(db_session: Any, staff_id: str, **kwargs: Any) -> Master:
-    defaults: dict[str, Any] = {"specialty": "живопись", "color": "#5B8C7A"}
+    # GH #599: color/flag only — the directions live in the M2M (raw
+    # ORM seed, no D5 gate; tests here don't assert on directions).
+    defaults: dict[str, Any] = {"color": "#5B8C7A"}
     defaults.update(kwargs)
     ext = Master(staff_id=staff_id, **defaults)
     db_session.add(ext)
@@ -178,7 +195,8 @@ async def test_resolve_delete_blocked_by_activities(db_session) -> None:
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
     service_ = Service(
-        title="S", description="d", image_url="i", specialty="живопись",
+        title="S", description="d", image_url="i",
+        specialty_id=(await _t3_spec(db_session)).id,
         min_age=6, duration=90, record_info="r",
     )
     location = Location(title="L", capacity=10)
@@ -228,7 +246,8 @@ async def test_list_returns_cards_with_master_and_positions(db_session) -> None:
 
 async def _activity_deps(db_session) -> tuple[str, str]:
     service_ = Service(
-        title="S", description="d", image_url="i", specialty="живопись",
+        title="S", description="d", image_url="i",
+        specialty_id=(await _t3_spec(db_session)).id,
         min_age=6, duration=90, record_info="r",
     )
     location = Location(title="L", capacity=10)

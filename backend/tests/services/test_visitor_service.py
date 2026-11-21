@@ -20,11 +20,26 @@ import pytest
 from sqlalchemy import select
 
 from src.models.client import Client
+from src.models.specialty import Specialty
 from src.models.visitor import Visitor
 from src.services.decorators import _TRANSACTIONAL_MARKER
 from src.services.visitor import VisitorService, get_visitor_service
 
 pytestmark = pytest.mark.asyncio
+
+
+async def _t3_spec(db_session) -> Specialty:
+    """GH #599: one direction row per test world (find-or-create by title)."""
+    row = (
+        await db_session.execute(
+            select(Specialty).where(Specialty.title == "Живопись")
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title="Живопись")
+        db_session.add(row)
+        await db_session.flush()
+    return row
 
 
 async def test_delete_cascade_is_non_decorated_core_that_does_not_commit(db_session):
@@ -219,12 +234,13 @@ async def test_delete_cascade_is_own_edge_visitor_tags_and_row_only(
     from src.models.visit import Visit
 
     staff = Staff(first_name="Oe", last_name="T")
+    spec = await _t3_spec(db_session)
     service = Service(title="OeSvc", description="d", image_url="http://x",
-                      specialty="s", min_age=5, duration=60, record_info="r")
+                      specialty_id=spec.id, min_age=5, duration=60, record_info="r")
     location = Location(title="OeLoc", capacity=20)
     db_session.add_all([staff, service, location])
     await db_session.flush()
-    db_session.add(Master(staff_id=staff.id, specialty="s", color="#000000"))
+    db_session.add(Master(staff_id=staff.id, color="#000000"))
     await db_session.flush()
     activity = Activity(
         master_id=staff.id, service_id=service.id, location_id=location.id,

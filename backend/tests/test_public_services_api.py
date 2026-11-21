@@ -117,7 +117,7 @@ class TestPublicServicesList:
         assert fx["archived"]["id"] not in ids, "archived row leaked"
 
     def test_items_carry_exactly_the_ten_public_fields(
-        self, anon_client, dictionary_fixture
+        self, anon_client, dictionary_fixture, default_specialty
     ) -> None:
         """Ключи каждого элемента — ровно 10 публичных полей (staff-only
         ``duration``/``record_info``/``archived``/``is_public`` и
@@ -130,7 +130,9 @@ class TestPublicServicesList:
         visible_row = next(i for i in body if i["id"] == fx["visible"]["id"])
         assert visible_row["min_age"] == 5
         assert visible_row["max_age"] == 12
-        assert visible_row["specialty"] == "живопись"
+        # GH #599: ``specialty`` — отображаемая строка, титул записи
+        # справочника, на которую ссылается ``specialty_id``.
+        assert visible_row["specialty"] == default_specialty["title"]
         assert visible_row["description"] == "Богатый позитивный контроль"
         assert visible_row["image_url"] == "https://example.com/test.jpg"
 
@@ -212,17 +214,22 @@ def _bulk_seed_services(db_engine, n: int) -> None:
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from src.models.service import Service
+        from src.models.specialty import Specialty
         from src.util.utc import utc_now
 
         factory = async_sessionmaker(db_engine, expire_on_commit=False)
         now = utc_now()
+        # GH #599: ``specialty_id`` — NOT NULL FK; one dictionary row is
+        # seeded first (explicit columns — bulk ``insert()`` with dicts
+        # skips Python-side defaults) and shared by every service row.
+        specialty_id = "0b1f2e3d-0000-4000-8000-0000000000aa"
         rows = [
             {
                 "id": str(_uuid.uuid4()),
                 "title": f"Bulk-{i:05d}",
                 "description": "bulk seed",
                 "image_url": "https://example.com/bulk.jpg",
-                "specialty": "живопись",
+                "specialty_id": specialty_id,
                 "min_age": 6,
                 "max_age": None,
                 "duration": 90,
@@ -235,6 +242,15 @@ def _bulk_seed_services(db_engine, n: int) -> None:
             for i in range(n)
         ]
         async with factory() as session:
+            await session.execute(
+                insert(Specialty),
+                [{
+                    "id": specialty_id,
+                    "title": "Живопись",
+                    "created_at": now,
+                    "updated_at": now,
+                }],
+            )
             await session.execute(insert(Service), rows)
             await session.commit()
 

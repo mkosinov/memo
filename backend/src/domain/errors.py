@@ -48,10 +48,56 @@ class PositionNotFoundError(Exception):
 
 
 class SpecialtyRequiredError(Exception):
-    """Master section without a specialty (GH #266 D5 — обязательна).
+    """Master section without a specialty set (GH #266 D5 / GH #599 §4.4).
 
-    The router maps this to 422 ``SPECIALTY_REQUIRED``.
+    A LIVE master section must carry ≥1 specialty (``specialty_ids`` —
+    the M2M replaced the CSV column, the invariant is NOT weakened). The
+    router maps this to 422 ``SPECIALTY_REQUIRED``.
     """
+
+
+class SpecialtyNotFoundError(Exception):
+    """A master-section write referenced a specialty id that does not
+    exist (GH #599 §4.4).
+
+    Raised by the staff card composite writes when ``specialty_ids``
+    carries an unknown dictionary row — the exact ``PositionNotFoundError``
+    mirror (same composite-card flow). The router maps it to 422 with
+    the ``SPECIALTY_NOT_FOUND`` error code.
+    """
+
+    def __init__(self, specialty_id: str) -> None:
+        super().__init__(f"Specialty {specialty_id!r} not found")
+        self.specialty_id = specialty_id
+
+
+class SpecialtySetTooLongError(Exception):
+    """More than 50 distinct specialty ids in one master-section write
+    (GH #599 §4.4 — write-amplification guard, checked AFTER dedup).
+
+    The router maps this to 422 ``VALIDATION_ERROR``.
+    """
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(
+            f"Не более {limit} направлений в секции мастера"  # noqa: RUF001
+        )
+        self.limit = limit
+
+
+class SpecialtyTitleTakenError(Exception):
+    """Another specialty already holds this title case-insensitively (GH #599).
+
+    The collision is defined by the functional unique index on
+    ``lower(title)``; this error is raised BOTH by the UX-fast SELECT
+    precheck and by the authoritative ``IntegrityError`` catch around
+    the write (TOCTOU defense). The router maps it to 409
+    ``SPECIALTY_TITLE_TAKEN``.
+    """
+
+    def __init__(self, title: str) -> None:
+        super().__init__(f"Specialty title {title!r} is already taken")
+        self.title = title
 
 
 class ColorRequiredError(Exception):

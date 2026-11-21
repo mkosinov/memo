@@ -9,9 +9,11 @@ Pipeline contract under test (spec §5, plan Task 2):
   * source window [week_start−7 .. −1], target [week_start .. +6] via day_range;
   * filters: is_private / archived location → skipped_filtered; location not
     in the request list → silently out (no counter — spec §4);
-  * remap of archived masters: first active master with a non-empty CSV
-    specialty intersection in canonical board order (sort_order, first_name, id);
-    no replacement → skipped_no_master;
+  * remap of archived masters: first active master with a non-empty
+    specialty LINK-ID intersection in canonical board order (sort_order,
+    first_name, id; GH #599 — «пересечение по id связей» over
+    ``staff_specialties``, never title text); no replacement →
+    skipped_no_master;
   * dedup key (master_id, service_id, start+7d, duration) vs target rows AND
     in-run set → skipped_duplicates;
   * cap: > 100 rows to insert → 422 COPY_WEEK_SOURCE_TOO_LARGE (after dedup);
@@ -26,12 +28,13 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.models.activity import Activity
 from src.models.location import Location
 from src.models.master import Master
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tag import Tag, activity_tags
 from src.services.activity import get_activity_service
@@ -56,25 +59,67 @@ async def _make_master(
     specialty: str = "живопись",
     with_master_row: bool = True,
 ) -> str:
-    """Insert a Staff card (+ masters extension) and return its id (master_id)."""
+    """Insert a Staff card (+ masters extension) and return its id (master_id).
+
+    GH #599 R3: ``specialty`` (a CSV of titles, case-insensitive) is
+    linked via ``staff_specialties`` — find-or-create per title, the
+    pre-dictionary helper contract preserved.
+    """
+    from src.models.specialty import staff_specialties
+
     staff = Staff(first_name=first_name, last_name="Тестов", sort_order=sort_order)
     db_session.add(staff)
     await db_session.flush()
     if with_master_row:
         db_session.add(
             Master(
-                staff_id=staff.id, specialty=specialty,
+                staff_id=staff.id,
                 color="#5B8C7A", is_active=is_active,
             )
         )
+        await db_session.flush()
+        for raw in specialty.split(","):
+            title = raw.strip()
+            if not title:
+                continue
+            # Case-insensitive find (the dictionary unique index is
+            # lower(title) — «Живопись» and «живопись» are ONE row).
+            spec = (
+                await db_session.execute(
+                    select(Specialty).where(
+                        func.lower(Specialty.title) == title.lower()
+                    )
+                )
+            ).scalar_one_or_none()
+            if spec is None:
+                spec = Specialty(title=title)
+                db_session.add(spec)
+                await db_session.flush()
+            await db_session.execute(
+                staff_specialties.insert().values(
+                    staff_id=staff.id, specialty_id=spec.id
+                )
+            )
         await db_session.flush()
     return staff.id
 
 
 async def _make_service(db_session, *, is_active: bool = True) -> Service:
+    # GH #599: the direction is a dictionary reference (find-or-create —
+    # case-insensitive: ``_make_master`` may have seeded the lowercase
+    # variant of the same title; lower(title) is one dictionary row).
+    spec = (
+        await db_session.execute(
+            select(Specialty).where(func.lower(Specialty.title) == "живопись")
+        )
+    ).scalar_one_or_none()
+    if spec is None:
+        spec = Specialty(title="Живопись")
+        db_session.add(spec)
+        await db_session.flush()
     service = Service(
         title="Тест-услуга", description="d", image_url="https://example.com/x.jpg",
-        specialty="живопись", min_age=5, max_age=99, duration=60,
+        specialty_id=spec.id, min_age=5, max_age=99, duration=60,
         record_info="r", is_active=is_active,
     )
     db_session.add(service)

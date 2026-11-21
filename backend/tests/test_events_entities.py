@@ -30,7 +30,7 @@ pytestmark = pytest.mark.pure_unit
 # the canonical set; #326 Task 1: `users` gains a WRITING owner (UserService
 # — scenario building blocks only, no @transactional methods); #326 Task 2:
 # `masters` likewise (MasterService) — both map entries are explicit owner
-# pairs, not cascade-only.
+# pairs, not cascade-only. GH #599: `specialties` (SpecialtyService).
 # Join tables (staff_positions/master_tags) are deliberately NOT canonical —
 # they are emitted as-is and skipped by consumers (see entities.py docstring).
 CANONICAL_ENTITIES = {
@@ -44,6 +44,7 @@ CANONICAL_ENTITIES = {
     "positions",
     "records",
     "services",
+    "specialties",
     "staff",
     "tags",
     "user_settings",

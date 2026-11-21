@@ -33,7 +33,10 @@ export type DeleteDialogEntityType =
   | 'staff' | 'master' | 'location' | 'service' | 'material' | 'client'
   | 'record' | 'activity' | 'tag'
   // GH #324 — dependent subjects on the deferred pipeline.
-  | 'photo' | 'position' | 'visitor';
+  | 'photo' | 'position' | 'visitor'
+  // GH #599 — the specialties dictionary (hard-delete family, blocked Mode B
+  // carries NO archive: the services dep is unresolvable).
+  | 'specialty';
 
 export interface DeleteDialogProps {
   /** Human-readable entity name — shown in the dialog title. */
@@ -137,6 +140,7 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
   photo: 'фото', // #324: deferred photo delete (photos directory)
   position: 'должности', // #324: deferred position delete (positions directory)
   visitor: 'посетителя', // #324 Task 8: deferred visitor delete (client card)
+  specialty: 'направления', // GH #599: deferred specialty delete (services page tab)
 };
 
 // #286 (spec §4): the activity tree's auto deps (photos/activity_tags) are
@@ -146,6 +150,21 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
 // informational auto lines (#207 §7.1 — «Без изменений: диалоги других
 // сущностей»).
 const AUTO_LINES_HIDDEN: ReadonlySet<DeleteDialogEntityType> = new Set<DeleteDialogEntityType>(['activity']);
+
+// GH #599: hard-delete dictionaries have NO archive flow — their blocked
+// Mode B offers acknowledgment only (the block message names the way out;
+// the archive escape hatch of records/masters does not apply).
+const BLOCKED_NO_ARCHIVE: ReadonlySet<DeleteDialogEntityType> = new Set<DeleteDialogEntityType>(['specialty']);
+
+// GH #599: Mode B count-word plural forms keyed by the BLOCKING dep's
+// `relation` (the backend matrix ships the Russian label — single source of
+// truth, the RELATION_PLURAL convention). Records/masters/activities block
+// on «Активность», specialties on «Услуга» (the «Услуги: N» tree); extend
+// when the matrix grows. Unknown relations degrade to the label itself.
+const BLOCK_PLURAL_FORMS: Record<string, [string, string, string]> = {
+  Активность: ['активность', 'активности', 'активностей'],
+  Услуга: ['услуга', 'услуги', 'услуг'],
+};
 
 // Per-relation nullify tail (spec §7.1: "○ Фото: 12 (отвязаны от услуги)").
 // Nullify deps exist only for Service→photos and Client→records (§4 matrix);
@@ -194,6 +213,11 @@ function actionSuffix(dep: DependencyNode, entityType: DeleteDialogEntityType): 
   if (entityType === 'position') {
     return 'потеряют должность';
   }
+  // GH #599: the specialty's holders SURVIVE the delete — the staff_specialties
+  // join rows die (auto-cascade), the wording is the surviving-parent one.
+  if (entityType === 'specialty') {
+    return 'потеряют направление';
+  }
   return pluralSuffix(dep.count, 'удалён', 'удалены', 'удалены');
 }
 
@@ -227,6 +251,7 @@ function DepItemGroup({
   if (entityType === 'tag') groupTail = 'будут сняты';
   else if (entityType === 'photo') groupTail = 'будут отвязаны';
   else if (entityType === 'position') groupTail = 'потеряют должность';
+  else if (entityType === 'specialty') groupTail = 'потеряют направление';
   return (
     <>
       <div className="font-medium" style={{ color: 'var(--ink)' }}>
@@ -402,10 +427,48 @@ export function DeleteDialog({
     </div>
   );
 
-  // ── Mode B — blocked by activities (§7.2): archive-only, no "Удалить". ──
+  // ── Mode B — blocked by unresolvable deps (§7.2): archive-only for
+  // archivable subjects, acknowledgment-only for the no-archive families. ──
   if (blocked) {
     const blockDep = dependencies.find((d) => d.allowed_actions.length === 0)!;
-    const plural = pluralSuffix(blockDep.count, 'активность', 'активности', 'активностей');
+    // GH #599: the count-word derives from the BLOCKING dep's relation —
+    // «активность» for records/masters/activities, «услуга» for the
+    // specialty's services node («Услуги: N», spec §4.2).
+    const [one, few, many] = BLOCK_PLURAL_FORMS[blockDep.relation] ?? (() => {
+      const lower = blockDep.relation.toLowerCase();
+      return [lower, lower, lower] as [string, string, string];
+    })();
+    const plural = pluralSuffix(blockDep.count, one, few, many);
+    // GH #599: hard-delete dictionaries (specialties) offer NO archive —
+    // the only way out is the block message itself («Понятно» closes).
+    if (BLOCKED_NO_ARCHIVE.has(entityType)) {
+      return overlay(
+        <>
+          <h2 className="text-sm font-semibold truncate" style={{ color: 'var(--ink)' }} data-testid="delete-dialog-title">
+            {title}
+          </h2>
+          <p className="text-sm mt-3" style={{ color: 'var(--ink)' }} data-testid="delete-dialog-block-message">
+            Нельзя удалить: есть {blockDep.count} {plural}.
+          </p>
+          <p className="text-sm mt-1" style={{ color: 'var(--ink-mid)' }} data-testid="delete-dialog-block-hint">
+            {blockDep.message ?? `Сначала удалите активности вручную или архивируйте ${TITLE_BY_TYPE[entityType]}.`}
+          </p>
+          {errorBlock}
+          <div className="flex justify-end gap-2 mt-4">
+            {cancelButton}
+            <button
+              data-testid="delete-dialog-ack-btn"
+              onClick={onCancel}
+              disabled={busy}
+              className="px-4 py-2 text-sm rounded-lg text-white transition-colors disabled:opacity-50"
+              style={{ backgroundColor: 'var(--brand)' }}
+            >
+              Понятно
+            </button>
+          </div>
+        </>,
+      );
+    }
     return overlay(
       <>
         <h2 className="text-sm font-semibold truncate" style={{ color: 'var(--ink)' }} data-testid="delete-dialog-title">

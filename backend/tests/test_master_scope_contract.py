@@ -227,6 +227,14 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("PUT", "/api/v1/positions/{id}"): "positions:write → 403",
     ("PATCH", "/api/v1/positions/{id}"): "positions:write → 403",
     ("DELETE", "/api/v1/positions/{id}"): "positions:write → 403",
+    # GH #599: the specialties dictionary — admin-only, the positions/
+    # materials pattern (ROLE_PERMISSIONS carries no specialties:* for
+    # master → the permission gate answers 403 before scope would run).
+    ("GET", "/api/v1/specialties"): "specialties:read — master has no token → 403",
+    ("GET", "/api/v1/specialties/all"): "specialties:read → 403",
+    ("POST", "/api/v1/specialties"): "specialties:write → 403",
+    ("PATCH", "/api/v1/specialties/{id}"): "specialties:write → 403",
+    ("DELETE", "/api/v1/specialties/{id}"): "specialties:write → 403",
     ("GET", "/api/v1/materials"): "materials:read — master has no token → 403",
     ("GET", "/api/v1/materials/{id}"): "materials:read → 403",
     ("GET", "/api/v1/materials/all"): "materials:read → 403",

@@ -28,6 +28,7 @@ from src.domain.errors import BareListLimitExceededError
 from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.tariff import Tariff
 from src.schemas.common import ArchiveStatusParams, PaginatedResponse
 from src.schemas.service import (
@@ -68,6 +69,10 @@ _READ_GUARD = [Depends(require_permission("services:read"))]
 # → is_active; ``tariffs`` → correlated COUNT subquery (records idiom
 # for aggregate sort keys — #213 pin: content moves AS-IS, ``.correlate()``
 # preserved). ``material_hint`` removed by GH #223 Task 13 (spec §10).
+# ``specialty`` (GH #599 R2): the linked dictionary title —
+# ``Specialty.title`` over the LEFT JOIN the list statements already
+# carry (``domain/sorting.services_specialty_join``; the key semantic is
+# unchanged — one direction per service, spec §4.5).
 # All keys are canonical (asc → nullsfirst / desc → nullslast); the
 # ``sort_by=None`` fallback stays in the route (spec §4.3).
 _SERVICE_SORT_KEYS: SortKeyMap = {
@@ -80,7 +85,7 @@ _SERVICE_SORT_KEYS: SortKeyMap = {
         .correlate(Service)
         .scalar_subquery()
     ]),
-    "specialty": SortKeySpec([Service.specialty]),
+    "specialty": SortKeySpec([Specialty.title]),
     "archived": SortKeySpec([Service.is_active]),
     "created_at": SortKeySpec([Service.created_at]),
 }

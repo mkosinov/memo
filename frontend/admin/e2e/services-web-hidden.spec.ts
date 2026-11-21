@@ -164,6 +164,10 @@ test.describe('GH #606 — services web visibility (admin)', () => {
     // Duration is required (min 15) and inits to 0 — must fill to pass
     // validation before the first save.
     await dialog.getByLabel('Длительность').fill('90');
+    // GH #599: «Направление» is a REQUIRED dictionary select — the create
+    // submit is blocked («Обязательное поле») until a direction is chosen.
+    // Any seeded option passes; «Живопись» is the canon pick.
+    await dialog.getByLabel(/^Направление/).selectOption({ label: 'Живопись' });
 
     // Default ON (direct binding), flip OFF before the first save.
     const toggle = dialog.getByTestId('toggle-is-public');

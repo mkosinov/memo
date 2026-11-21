@@ -11,8 +11,9 @@
 #     Должность влияет только на зарплатный модуль, не на доступ.
 #   - master — блок расписания. Есть блок = человек стоит в расписании
 #     мастером. Нет блока = сотрудник без расписания (администратор, СММ…).
-#       specialty — обязательна; можно несколько через запятую:
-#                   specialty: "живопись, керамика"
+#       specialties — НАЗВАНИЯ-ССЫЛКИ на направления из specialties.yaml
+#                     (регистр не важен); минимум одно. Можно несколько:
+#                     specialties: [Керамика, живопись]
 #       color     — цвет в расписании, ровно #RRGGBB
 #       is_active — участвует ли в распределении занятий (true/false)
 #   - avatar_url — путь к фото в репозитории фронта, можно "".
@@ -35,7 +36,7 @@ staff:
     avatar_url: ""
     positions: [Мастер]
     master:
-      specialty: живопись
+      specialties: [живопись]
       color: "#5B8C7A"
       is_active: true
       tags: []
@@ -46,7 +47,7 @@ staff:
     avatar_url: ""
     positions: [Мастер]
     master:
-      specialty: керамика
+      specialties: [керамика]
       color: "#6B7E9C"
       is_active: true
       tags: []
@@ -57,7 +58,7 @@ staff:
     avatar_url: ""
     positions: [Мастер]
     master:
-      specialty: живопись
+      specialties: [керамика, живопись]
       color: "#A07060"
       is_active: true
       tags: []
@@ -68,7 +69,7 @@ staff:
     avatar_url: ""
     positions: [Мастер]
     master:
-      specialty: керамика
+      specialties: [керамика]
       color: "#7A6E9C"
       is_active: true
       tags: []
@@ -79,7 +80,7 @@ staff:
     avatar_url: ""
     positions: [Мастер]
     master:
-      specialty: живопись
+      specialties: [живопись]
       color: "#8A7840"
       is_active: true
       tags: []
@@ -90,7 +91,7 @@ staff:
     avatar_url: ""
     positions: [Мастер]
     master:
-      specialty: керамика
+      specialties: [керамика]
       color: "#9A5870"
       is_active: true
       tags: []

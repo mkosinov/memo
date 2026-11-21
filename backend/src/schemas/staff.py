@@ -12,8 +12,9 @@ view carries its own ``archived`` (the schedule flag, D3).
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 — pydantic resolves field types at runtime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -45,13 +46,14 @@ class StaffListParams(SortParams[StaffSortBy], PaginationParams):
 
 
 class MasterSection(BaseModel):
-    """Master section of the card (D5): specialty + color, both required.
+    """Master section of the card (D5): specialty set + color.
 
-    Presence is validated at the SERVICE level
-    (``SPECIALTY_REQUIRED``/``COLOR_REQUIRED`` error codes, spec «Контракты
-    ошибок») — so the schema deliberately accepts absent/blank values and
-    defaults them to ``""`` instead of rejecting here with a generic
-    VALIDATION_ERROR.
+    GH #599: ``specialty_ids`` — the hard-replace direction set (the M2M
+    ``staff_specialties``); duplicates are deduped, >50 distinct ids →
+    422, an unknown id → 422 (existence is validated at the SERVICE
+    level, the ``position_ids`` pattern — so the schema deliberately
+    accepts an empty list and the empty-set-on-live-section case raises
+    ``SPECIALTY_REQUIRED`` there, not as a generic VALIDATION_ERROR).
 
     ``archived`` (T8 Gap A): optional schedule-archive request — ``None``
     (absent) = don't touch ``masters.is_active``; ``True`` = archive the
@@ -60,17 +62,25 @@ class MasterSection(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    specialty: str = ""
+    specialty_ids: list[UUID] = []
     color: str = ""
     archived: bool | None = None
 
 
 class MasterSectionView(BaseModel):
-    """Master-section projection in ``StaffResponse`` (schedule side)."""
+    """Master-section projection in ``StaffResponse`` (schedule side).
+
+    GH #599: ``specialty`` is the DISPLAY string — the linked dictionary
+    titles joined «, » alphabetically (never input order); the ids ride
+    along in the SAME title order. Both are filled by the serializer
+    from the pre-fetched links (explicit construction — the ORM ``Master``
+    row no longer carries a specialty column).
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     specialty: str
+    specialty_ids: list[str] = []
     color: str
     is_active: bool = Field(exclude=True)
     created_at: datetime

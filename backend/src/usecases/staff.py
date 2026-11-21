@@ -131,14 +131,20 @@ async def _write_section(
     staff_id: str,
     section: MasterSection | None,
 ) -> None:
-    """Upsert (payload) / remove (``None``) the masters extension row."""
+    """Upsert (payload) / remove (``None``) the masters extension row.
+
+    GH #599: a payload section carries ``specialty_ids`` (hard-replace
+    set → the M2M; empty set on the live section → ``SPECIALTY_REQUIRED``
+    inside the owner, D5 not weakened). ``None`` removes the row AND its
+    specialty links («без секции направлений нет»).
+    """
     if section is None:
         await get_master_service().remove_extension(db_session, staff_id)
         return
     await get_master_service().upsert_extension(
         db_session,
         staff_id,
-        section.specialty,
+        [str(sid) for sid in section.specialty_ids],
         section.color,
         archived=section.archived,
     )

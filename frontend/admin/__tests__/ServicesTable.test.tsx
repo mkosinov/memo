@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ServiceResponse, DependencyNode, PaginatedResponse, MaterialResponse } from '@memo/api-client';
+import type { ServiceResponse, DependencyNode, PaginatedResponse, MaterialResponse, SpecialtyResponse } from '@memo/api-client';
+import { mockSpecialties } from './helpers/mockData';
 
 // ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
 
@@ -31,6 +32,7 @@ const mockService1: ServiceResponse = {
   title: 'Картина маслом',
   description: 'Мастер-класс по рисованию маслом',
   image_url: '',
+  specialty_id: 'spec-painting',
   specialty: 'Живопись',
   min_age: 12,
   max_age: 18,
@@ -53,6 +55,7 @@ const mockService2: ServiceResponse = {
   title: 'Картина акрилом',
   description: 'Акриловая живопись',
   image_url: '',
+  specialty_id: 'spec-graphics',
   specialty: 'Графика',
   min_age: 6,
   max_age: 14,
@@ -74,6 +77,7 @@ const mockService3: ServiceResponse = {
   title: 'Ручная лепка',
   description: 'Лепка из глины',
   image_url: '',
+  specialty_id: 'spec-ceramics',
   specialty: 'Керамика',
   min_age: 5,
   max_age: 12,
@@ -99,6 +103,10 @@ const MOCK_MATERIALS: MaterialResponse[] = [
   { id: 'mat-a', title: 'Акварель', description: 'Акварельные краски', archived: false, used_in_services_count: 0, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
   { id: 'mat-k', title: 'Керамика', description: 'Глина', archived: false, used_in_services_count: 0, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
 ];
+
+// GH #599: the directions dictionary for the ServiceModal «Направление»
+// select (/specialties/all) — shared helper fixtures (spec-painting/ceramics).
+const MOCK_SPECIALTIES: SpecialtyResponse[] = mockSpecialties;
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +150,8 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     resolveDeleteService: vi.fn(),
     // #223 T5: ServiceModal's materials picker fetches /all?status=active
     getAllMaterials: vi.fn(),
+    // GH #599: ServiceModal's «Направление» select fetches /specialties/all
+    getAllSpecialties: vi.fn(),
   };
 });
 
@@ -195,12 +205,13 @@ function mockAuthFor(role: 'admin' | 'master', permissions: string[]) {
   } as unknown as ReturnType<typeof useAuth>);
 }
 
-import { getServices, getAllMaterials, ApiError } from '@memo/api-client';
+import { getServices, getAllMaterials, getAllSpecialties, ApiError } from '@memo/api-client';
 import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
 import { ServicesProvider } from '@/contexts/ServicesContext';
 
 const mockGetServices = vi.mocked(getServices);
 const mockGetAllMaterials = vi.mocked(getAllMaterials);
+const mockGetAllSpecialties = vi.mocked(getAllSpecialties);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -242,6 +253,7 @@ describe('ServicesTable', () => {
     vi.clearAllMocks();
     localStorage.clear();
     mockGetAllMaterials.mockResolvedValue(MOCK_MATERIALS);
+    mockGetAllSpecialties.mockResolvedValue(MOCK_SPECIALTIES);
     // GH #263 T9 default: admin ('*') — the historical hardcoded state.
     mockAuthFor('admin', ['*']);
   });
@@ -1115,6 +1127,8 @@ describe('ServicesTable', () => {
       target: { value: 'Новая услуга' },
     });
     fireEvent.change(screen.getByLabelText(/Длительность/), { target: { value: '90' } });
+    // GH #599: the direction select is required — pick a dictionary entry.
+    fireEvent.change(screen.getByLabelText(/^Направление/), { target: { value: 'spec-painting' } });
     await screen.findByRole('checkbox', { name: 'Акварель' });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Акварель' }));
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
@@ -1179,6 +1193,7 @@ describe('ServicesTable permission gating (GH #263 T9)', () => {
     vi.clearAllMocks();
     localStorage.clear();
     mockGetAllMaterials.mockResolvedValue(MOCK_MATERIALS);
+    mockGetAllSpecialties.mockResolvedValue(MOCK_SPECIALTIES);
   });
 
   afterEach(() => {

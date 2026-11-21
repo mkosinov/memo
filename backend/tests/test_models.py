@@ -27,6 +27,7 @@ from src.models import (
     Visit,
     Visitor,
 )
+from src.models.specialty import Specialty
 from src.util.utc import utc_now
 
 
@@ -77,14 +78,22 @@ def _create_all_and_session(engine):
 
 
 def _mk_master(session: Session, *, first_name: str = "A", last_name: str = "B",
-               specialty: str = "живопись", color: str = "#000000") -> str:
+               color: str = "#000000") -> str:
     """GH #266: create Staff card + masters extension; return the shared id."""
     staff = Staff(first_name=first_name, last_name=last_name)
     session.add(staff)
     session.flush()
-    session.add(Master(staff_id=staff.id, specialty=specialty, color=color))
+    session.add(Master(staff_id=staff.id, color=color))
     session.flush()
     return staff.id
+
+
+def _mk_specialty(session: Session, title: str = "Живопись") -> Specialty:
+    """GH #599: create a dictionary row for service FK links."""
+    row = Specialty(title=title)
+    session.add(row)
+    session.flush()
+    return row
 
 
 @pytest.mark.pure_unit
@@ -123,12 +132,14 @@ class TestModelImports:
             "Service", "ServiceMaterial", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
             "Material", "UserSettings", "AuditLog",
+            "Specialty",  # GH #599 — the specialties dictionary
             "OtpCode",  # #499 §4.1 — re-exported from src.auth.otp
             "AuthCall", "AuthCallAttempt",  # #593 §Хранение — re-exported from src.auth.callcheck
             "ArchiveStatus", "Channel", "RecordStatus", "UserRole",
             "service_tags", "activity_tags", "photo_tags",
             "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
             "staff_positions",
+            "staff_specialties",  # GH #599 — the staff ↔ specialty M2M
         ]
         assert sorted(__all__) == sorted(expected)
 
@@ -172,8 +183,9 @@ class TestModelCrud:
 
     def test_master_crud(self, session: Session):
         """GH #266: the card (Staff) + the schedule extension (Master) —
-        one id shared by both, names on the card, specialty/color on the
-        extension."""
+        one id shared by both, names on the card, color on the
+        extension (GH #599: the directions live in the staff_specialties
+        M2M, not on the extension row)."""
         from src.models import Master
         staff = Staff(
             first_name="Anna",
@@ -182,7 +194,7 @@ class TestModelCrud:
         )
         session.add(staff)
         session.flush()
-        session.add(Master(staff_id=staff.id, specialty="живопись", color="#FF5733"))
+        session.add(Master(staff_id=staff.id, color="#FF5733"))
         session.flush()
 
         card = session.get(Staff, staff.id)
@@ -192,7 +204,6 @@ class TestModelCrud:
         assert card.is_active is True
         ext = session.get(Master, staff.id)
         assert ext.staff_id == staff.id
-        assert ext.specialty == "живопись"
         assert ext.color == "#FF5733"
         assert ext.is_active is True
 
@@ -279,7 +290,7 @@ class TestModelCrud:
             title="Portrait Painting",
             description="Learn to paint portraits",
             image_url="https://example.com/service.jpg",
-            specialty="живопись",
+            specialty_id=_mk_specialty(session).id,
             min_age=12,
             max_age=99,
             duration=120,
@@ -295,7 +306,8 @@ class TestModelCrud:
         from src.models import Service, Tariff
         svc = Service(
             title="S1", description="d", image_url="http://x.com/i",
-            specialty="живопись", min_age=1, max_age=99, duration=60, record_info="r",
+            specialty_id=_mk_specialty(session).id,
+            min_age=1, max_age=99, duration=60, record_info="r",
         )
         session.add(svc)
         session.flush()
@@ -356,7 +368,8 @@ class TestModelCrud:
         from src.models import Activity, Location, Service
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L", capacity=10)
         session.add_all([svc, loc])
@@ -463,7 +476,8 @@ class TestModelCrud:
         from src.models import Activity, Client, Location, Record, Service
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L", capacity=10)
         client = Client(name="Client", phone="+79001234567", channel="phone")
@@ -498,7 +512,8 @@ class TestModelCrud:
         )
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L", capacity=10)
         client = Client(name="C", phone="+79001234567", channel="phone")
@@ -537,7 +552,8 @@ class TestModelCrud:
         )
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L", capacity=10)
         client = Client(name="C", phone="+79001234567", channel="phone")
@@ -571,7 +587,7 @@ class TestModelCrud:
             title="Post-retirement Service",
             description="desc",
             image_url="https://example.com/img.jpg",
-            specialty="керамика",
+            specialty_id=_mk_specialty(session, "Керамика").id,
             min_age=5,
             max_age=50,
             duration=90,
@@ -611,7 +627,8 @@ class TestModelCrud:
 
     def test_service_tags_join(self, session: Session):
         from src.models import Service, Tag, service_tags
-        svc = Service(title="S2", description="d", image_url="http://x.com/i", specialty="керамика",
+        _spec = _mk_specialty(session, "керамика")
+        svc = Service(title="S2", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=5, max_age=50, duration=90, record_info="r")
         tag1 = Tag(title="for-kids")
         tag2 = Tag(title="weekend")
@@ -636,7 +653,8 @@ class TestModelCrud:
         from src.models import Activity, Location, Service, Tag, activity_tags
         now = self._now()
         m_id = _mk_master(session)
-        svc = Service(title="S3", description="d", image_url="http://x.com/i", specialty="живопись",
+        _spec = _mk_specialty(session, "живопись")
+        svc = Service(title="S3", description="d", image_url="http://x.com/i", specialty_id=_spec.id,
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(title="L3", capacity=10)
         tag = Tag(title="private-class")

@@ -9,7 +9,9 @@
  * dedicated service with an unmistakable title (activities carry no
  * title — the schedule card heading is the service title) and ONE
  * activity at the shared current-week slot (weekSlot, re-exported from
- * the #600 fixture — one slot rule, two fixtures):
+ * the #600 fixture — one slot rule, two fixtures). The service
+ * direction is a dictionary reference (GH #599): find-or-create
+ * «живопись» → ``specialty_id`` (ensureSpecialtyId):
  *   «601-E2E-Скрытая»    → is_public = 0 (absent from the site filter
  *                            and schedule; direct-id booking → 404)
  *   «601-E2E-Контроль»   → is_public = 1 (the positive control)
@@ -19,7 +21,7 @@
  */
 import { randomUUID } from 'crypto';
 import { queryDB, queryDBRow } from './db-query';
-import { weekSlot } from './visibility-pair';
+import { ensureSpecialtyId, weekSlot } from './visibility-pair';
 
 /** Unmistakable titles — the specs select on these substrings. */
 export const HIDDEN_LOCATION_TITLE = '601-E2E-Скрытая площадка';
@@ -79,11 +81,15 @@ export function seedLocationVisibilityPair(): LocationVisibilityPair {
   insertLocation(pair.visibleLocationId, VISIBLE_LOCATION_TITLE, 1);
 
   const insertService = (id: string, title: string): void => {
+    // GH #599: ``specialty`` is gone — the direction rides the
+    // ``specialty_id`` dictionary reference (the shared find-or-create
+    // helper of visibility-pair.ts, one slot rule → two fixtures).
+    const specialtyId = esc(ensureSpecialtyId('живопись'));
     queryDB(
-      `INSERT INTO services (id, title, description, image_url, specialty, ` +
+      `INSERT INTO services (id, title, description, image_url, specialty_id, ` +
         `min_age, max_age, duration, record_info, is_active, created_at, updated_at) VALUES ` +
-        `('${id}', '${esc(title)}', 'E2E #601', '/images/card-watercolor.jpg', 'живопись', ` +
-        `6, NULL, 90, '', 1, datetime('now'), datetime('now'))`,
+        `('${id}', '${esc(title)}', 'E2E #601', '/images/card-watercolor.jpg', ` +
+        `'${specialtyId}', 6, NULL, 90, '', 1, datetime('now'), datetime('now'))`,
     );
   };
   insertService(pair.hiddenServiceId, HIDDEN_SERVICE_TITLE);

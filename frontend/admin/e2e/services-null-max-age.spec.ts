@@ -44,13 +44,17 @@ let NULL_AGE_SEED = { id: '' };
 /** Seed service with max_age: 12 — the only non-null in the seed. */
 let AGE12_SEED = { id: '', title: 'Акварель' };
 
-/** Full service row as the GET endpoint returns it (fields we restore). */
+/** Full service row as the GET endpoint returns it (fields we restore).
+ *  GH #599: the direction travels as the dictionary FK `specialty_id`;
+ *  `specialty` is the read-only DISPLAY string (joined titles). */
 interface ServiceRow {
   id: string;
   title: string;
   description: string;
   image_url: string;
   specialty: string;
+  specialty_id: string;
+  is_public: boolean;
   min_age: number;
   max_age: number | null;
   duration: number;
@@ -81,14 +85,17 @@ async function captureService(request: APIRequestContext, id: string) {
 /**
  * Map a GET response onto the exact ServiceUpdate shape (PUT forbids extras).
  * Material links ride the GET as `{id, note}` — the write shape is
- * `{material_id, note}`.
+ * `{material_id, note}`. GH #599: the write carries the dictionary FK
+ * `specialty_id` (the GET's `specialty` string is display-only) plus
+ * `is_public` — PUT forbids extras, so both must ride every payload.
  */
 function toUpdatePayload(s: ServiceRow, tagIds: string[]) {
   return {
     title: s.title,
     description: s.description,
     image_url: s.image_url,
-    specialty: s.specialty,
+    specialty_id: s.specialty_id,
+    is_public: s.is_public,
     min_age: s.min_age,
     max_age: s.max_age,
     duration: s.duration,

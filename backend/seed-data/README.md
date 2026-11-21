@@ -14,10 +14,11 @@ and is safe to re-run.
 | File | What you fill |
 |---|---|
 | `locations.yaml` | studios: title, address, capacity, hint, image, `is_public` (web visibility) |
+| `specialties.yaml` | specialty dictionary (a plain list of titles) referenced by services and masters |
 | `services.yaml` | services with nested tariffs, tags and material links, `is_public` (web visibility) |
 | `materials.yaml` | material/technique dictionary referenced by services |
 | `tags.yaml` | tag dictionary referenced by services, locations, masters |
-| `staff.yaml` | employees, their positions, and the master (schedule) block |
+| `staff.yaml` | employees, their positions, and the master (schedule) block with `specialties` links |
 
 Location and service `is_public` conversion from the owner's CSV (column
 «видно клиентам», spec §2.7): blank or «да» → `is_public: true`, «нет» →

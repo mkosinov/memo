@@ -53,6 +53,7 @@ from src.models import (
     Position,
     Record,
     Service,
+    Specialty,
     Staff,
     Tag,
     UserSettings,
@@ -124,6 +125,7 @@ class TestSchemaToMatrix:
 _PREFIX_TO_SUBJECT: dict[str, type[Base]] = {
     "staff": Staff,
     "positions": Position,
+    "specialties": Specialty,
     "locations": Location,
     "services": Service,
     "tags": Tag,

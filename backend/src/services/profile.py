@@ -58,14 +58,6 @@ _PROFILE_FIELDS = (
 )
 
 
-def _split_specialties_csv(csv: str) -> list[str]:
-    """«живопись, керамика» → ``["живопись", "керамика"]``.
-
-    Whitespace-tolerant; empty segments dropped (no phantom values).
-    """
-    return [part.strip() for part in csv.split(",") if part.strip()]
-
-
 def _normalize_series_number(value: str) -> str:
     """Trim + collapse inner whitespace runs (spec §3.1)."""
     return " ".join(value.split())
@@ -163,6 +155,28 @@ class ProfileService:
             setattr(profile, field, value)
         return profile
 
+    async def _specialty_titles(
+        self, db_session: AsyncSession, staff_id: str
+    ) -> list[str]:
+        """The card's linked direction titles, alphabetical (GH #599 §4.6).
+
+        ONE query over ``staff_specialties`` ⨝ ``specialties`` ordered by
+        ``title`` — the same codepoint sort that builds the master-section
+        display string (spec §4.4; SQLite BINARY ordering). The response
+        FORM is unchanged from the CSV era: ``list[str] | None``, the
+        titles of the CURRENT links (a dictionary rename changes what a
+        later GET shows — the /my view is live, unlike audit snapshots).
+        """
+        from src.models.specialty import Specialty, staff_specialties
+
+        rows = await db_session.execute(
+            select(Specialty.title)
+            .join(staff_specialties, Specialty.id == staff_specialties.c.specialty_id)
+            .where(staff_specialties.c.staff_id == staff_id)
+            .order_by(Specialty.title)
+        )
+        return list(rows.scalars().all())
+
     async def get(
         self, db_session: AsyncSession, user_id: str
     ) -> MyProfileResponse:
@@ -170,7 +184,12 @@ class ProfileService:
         user, staff, master, profile = await self._context(
             db_session, user_id
         )
-        return self._to_response(user, staff, master, profile)
+        specialties = (
+            await self._specialty_titles(db_session, staff.id)
+            if master is not None and staff is not None
+            else None
+        )
+        return self._to_response(user, staff, master, profile, specialties)
 
     async def get_master_section(
         self, db_session: AsyncSession, user_id: str
@@ -183,13 +202,17 @@ class ProfileService:
         ``has_master``); the router composes it into
         ``MyStaffProfileResponse`` only on the master branch.
         """
-        _user, _staff, master, _profile = await self._context(
+        _user, staff, master, _profile = await self._context(
             db_session, user_id
         )
-        if master is None:
+        if master is None or staff is None:
             return None
         return MyMasterSection(
-            specialties=_split_specialties_csv(master.specialty),
+            # GH #599: the section's directions are the staff_specialties
+            # links (same read as ``get()`` — the CSV column is gone, and
+            # ``master.specialty`` is a non-mapped audit-glue attr, ``None``
+            # on fresh loads).
+            specialties=await self._specialty_titles(db_session, staff.id),
             color=master.color,
         )
 
@@ -291,7 +314,12 @@ class ProfileService:
 
         # Re-read the freshly written halves for the response (the ORM
         # objects are in the identity map — plain attribute reads suffice).
-        return self._to_response(user, staff, master, profile)
+        specialties = (
+            await self._specialty_titles(db_session, staff.id)
+            if master is not None and staff is not None
+            else None
+        )
+        return self._to_response(user, staff, master, profile, specialties)
 
     @transactional
     async def set_avatar(
@@ -329,8 +357,17 @@ class ProfileService:
         staff: Staff | None,
         master: Master | None,
         profile: UserProfile | None,
+        specialties: list[str] | None,
     ) -> MyProfileResponse:
-        """Assemble the flat §4 shape from the four source rows."""
+        """Assemble the flat §4 shape from the four source rows.
+
+        ``specialties`` arrives pre-fetched (the caller's links read —
+        alphabetical titles): the ``masters.specialty`` CSV column is
+        gone (GH #599) and the /my view reads the M2M instead. The
+        write side stays one-way — ``MyProfileUpdate.specialties`` is
+        accepted-but-ignored (D5: the set is owned by the admin staff
+        routes; pinned by ``test_specialties_ignored_on_write``).
+        """
         return MyProfileResponse(
             role=user.role,
             has_staff=staff is not None,
@@ -338,11 +375,7 @@ class ProfileService:
             first_name=staff.first_name if staff is not None else None,
             last_name=staff.last_name if staff is not None else None,
             avatar_url=staff.avatar_url if staff is not None else None,
-            specialties=(
-                _split_specialties_csv(master.specialty)
-                if master is not None
-                else None
-            ),
+            specialties=specialties if master is not None else None,
             patronymic=profile.patronymic if profile is not None else None,
             birth_date=profile.birth_date if profile is not None else None,
             residence_address=(

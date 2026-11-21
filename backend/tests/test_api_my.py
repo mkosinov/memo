@@ -10,9 +10,9 @@ section/snapshot) — pinned exhaustively in
 
 Covers the plan RED list (spec §3.1/§4, D3/D7, domain-rules/profile.md):
 
-* profile flat shape exactly per §4 (role, has_staff, has_master, card
-  names/avatar, specialties array from the master-section CSV, private
-  fields);
+* GET flat profile exactly per §4 (role, has_staff, has_master, card
+  names/avatar, specialties array — the linked direction titles,
+  alphabetical, GH #599 — private fields);
 * ``has_staff=false`` for a user without a card OR with an archived card
   (names null; name writes ignored in that state);
 * ``has_master=false`` when the master section is absent/archived
@@ -208,6 +208,32 @@ class TestGetMyProfile:
             "registration_address": "ул. Тверская, 5",
         }
 
+    def test_specialties_alphabetical_regardless_of_link_order(
+        self, api_client, login_as, _my_hash
+    ) -> None:
+        """GH #599 (spec §4.6): ``specialties`` is the linked direction
+        titles ALPHABETICALLY — the link/input order («Керамика» was
+        linked FIRST) never leaks into the response. Ordering canon =
+        the same codepoint sort as the master-section display string
+        (spec §4.4/§7-2: «Керамика», «Живопись» → «Живопись, Керамика»)."""
+        phone = f"+7999{uuid.uuid4().hex[:7]}"
+        # Non-alphabetical link order (conftest adapter → specialty_ids).
+        card = {
+            "first_name": "Мария",
+            "last_name": "Иванова",
+            "master": {"specialty": "Керамика, Живопись", "color": "#5B8C7A"},
+        }
+        resp = api_client.post("/api/v1/staff", json=card)
+        assert resp.status_code == 201, resp.text
+        staff_id = resp.json()["id"]
+        insert_user(phone, _my_hash, role="master", master_id=staff_id)
+        client = login_as(phone, MY_PASSWORD)
+
+        # #584: the profile read (with ``specialties``) is the master
+        # branch now — flat ``/api/v1/my`` is whoami (no ``specialties``).
+        body = client.get(MASTER_URL).json()
+        assert body["specialties"] == ["Живопись", "Керамика"]
+
     def test_requires_session(self, anon) -> None:
         assert anon.get(MASTER_URL).status_code == 401
 
@@ -401,10 +427,14 @@ class TestPutMyProfile:
             MASTER_URL, json={"specialties": ["керамика", "скетчинг"]}
         )
         assert resp.status_code == 200, resp.text
-        rows = query_db(
-            f"SELECT specialty FROM masters WHERE staff_id = '{staff_id}'"
+        # GH #599: the directions are the staff_specialties links (the
+        # masters CSV column is gone); PUT /my specialties stays IGNORED.
+        links = query_db(
+            "SELECT s.title FROM staff_specialties ss"
+            " JOIN specialties s ON s.id = ss.specialty_id"
+            f" WHERE ss.staff_id = '{staff_id}' ORDER BY s.title"
         )
-        assert rows[0]["specialty"] == "живопись, керамика"
+        assert [r["title"] for r in links] == ["живопись", "керамика"]
         assert client.get(MASTER_URL).json()["specialties"] == [
             "живопись", "керамика",
         ]

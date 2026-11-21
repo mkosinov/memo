@@ -17,6 +17,7 @@ from src.models.abstract import AbstractModelSoftDelete
 if TYPE_CHECKING:
     from src.models.master import Master
     from src.models.position import Position
+    from src.models.specialty import Specialty
     from src.models.tag import Tag
 
 
@@ -40,12 +41,31 @@ class Staff(AbstractModelSoftDelete):
     positions: Mapped[list[Position]] = relationship(
         secondary="staff_positions", back_populates="staff",
     )
+    # GH #599: the master-section directions (M2M ``staff_specialties``,
+    # the staff_positions mirror). The links live on the CARD but are
+    # owned by the master-section write path (MasterService) and are
+    # cleared when the section is removed («без секции направлений нет»);
+    # ``passive_deletes=True`` — join rows die at the DB level (ON DELETE
+    # CASCADE on both FKs), SQLAlchemy must not load the collection to
+    # strip it first.
+    specialties: Mapped[list[Specialty]] = relationship(
+        secondary="staff_specialties",
+        back_populates="staff",
+        passive_deletes=True,
+    )
     # Tags travel with the master extension (master_tags), not the person;
     # kept accessible from the card for parity with the old Master model.
+    # The primaryjoin binds to the JOIN TABLE column, never to the Master
+    # ENTITY: an entity reference (``Staff.id == Master.staff_id``) only
+    # renders when the masters table rides the query — sqladmin's eager
+    # staff loads (edit/detail forms, GH #599 Task 5) compile it WITHOUT
+    # masters in FROM and crash ("no such column: masters.staff_id").
+    # ``master_tags.master_id`` IS the staff id (FK → masters.staff_id,
+    # the 1:1 extension PK) — same semantics, always renderable.
     tags: Mapped[list[Tag]] = relationship(
         "Tag",
         secondary="master_tags",
-        primaryjoin="Staff.id == Master.staff_id",
+        primaryjoin="Staff.id == master_tags.c.master_id",
         secondaryjoin="Tag.id == master_tags.c.tag_id",
         viewonly=True,
     )

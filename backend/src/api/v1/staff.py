@@ -36,9 +36,17 @@ from src.domain.errors import (
     PhoneTakenError,
     PositionIsSystemError,
     PositionNotFoundError,
+    SpecialtyNotFoundError,
     SpecialtyRequiredError,
+    SpecialtySetTooLongError,
 )
-from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
+from src.domain.sorting import (
+    SortExpr,
+    SortKeyMap,
+    SortKeySpec,
+    apply_sort,
+    staff_specialty_aggregate,
+)
 from src.errors import ErrorCode, ErrorDetail
 from src.models.master import Master
 from src.models.staff import Staff
@@ -89,16 +97,22 @@ _WRITE_GUARD = [
 _READ_GUARD = [Depends(require_permission("staff:read"))]
 
 # Sort whitelist map: UI key → spec (GH #367 Task 5, domain-rules/staff.md
-# «List contract»). ``position`` is EXCLUDED (M2M, ambiguous). specialty/color
-# live on the masters extension (a LEFT JOIN in the list query supplies
-# them) → policy ``always_nulls_last``: a card without the master section
+# «List contract»). ``position`` is EXCLUDED (M2M, ambiguous). ``color``
+# lives on the masters extension (a LEFT JOIN in the list query supplies
+# it) → policy ``always_nulls_last``: a card without the master section
 # sorts after sectioned ones in BOTH directions (#266 — «пустые — в
-# конце»). All other keys are canonical (asc → nullsfirst / desc →
-# nullslast). The ``sort_by=None`` fallback stays in the route (spec §4.3:
-# entity default, never passed to the resolver).
+# конце»). ``specialty`` (GH #599 §4.5): the DISPLAY STRING — the shared
+# correlated ``string_agg(title ORDER BY title)`` subquery over the
+# ``staff_specialties`` links (``domain/sorting.staff_specialty_aggregate``
+# — local resolvers are banned), same ``always_nulls_last`` policy. All
+# other keys are canonical (asc → nullsfirst / desc → nullslast). The
+# ``sort_by=None`` fallback stays in the route (spec §4.3: entity
+# default, never passed to the resolver).
 _STAFF_SORT_KEYS: SortKeyMap = {
     "name": SortKeySpec([Staff.first_name, Staff.last_name]),
-    "specialty": SortKeySpec([Master.specialty], policy="always_nulls_last"),
+    "specialty": SortKeySpec(
+        [staff_specialty_aggregate()], policy="always_nulls_last"
+    ),
     "color": SortKeySpec([Master.color], policy="always_nulls_last"),
     "avatar": SortKeySpec([Staff.avatar_url]),
     "status": SortKeySpec([Staff.is_active]),
@@ -115,6 +129,8 @@ def _section_error(code: ErrorCode, message: str) -> HTTPException:
 _SECTION_ERRORS: tuple[type[Exception], ...] = (
     SpecialtyRequiredError,
     ColorRequiredError,
+    SpecialtyNotFoundError,
+    SpecialtySetTooLongError,
     PositionNotFoundError,
     PositionIsSystemError,
     PasswordPolicyError,
@@ -131,6 +147,15 @@ def _map_domain_error(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, ColorRequiredError):
         return _section_error(ErrorCode.COLOR_REQUIRED, "Укажите цвет мастера")
+    if isinstance(exc, SpecialtyNotFoundError):
+        # The PositionNotFoundError mirror: an unknown id inside a
+        # composite-card section write → 422 (not the dictionary-route
+        # 404 — the row is not the request target).
+        return _section_error(
+            ErrorCode.SPECIALTY_NOT_FOUND, "Направление не найдено"
+        )
+    if isinstance(exc, SpecialtySetTooLongError):
+        return _section_error(ErrorCode.VALIDATION_ERROR, str(exc))
     if isinstance(exc, PositionNotFoundError):
         return _section_error(
             ErrorCode.POSITION_NOT_FOUND, "Должность не найдена"

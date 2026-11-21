@@ -140,7 +140,7 @@ async def test_staff_resolve_delete_cascades_extension_user_tags_positions(
     its extension row, user account, master_tags and staff_positions joins —
     everything but the tags/positions dictionaries themselves."""
     staff = await _add_staff(db_session)
-    ext = Master(staff_id=staff.id, specialty="живопись", color="#000000")
+    ext = Master(staff_id=staff.id, color="#000000")
     db_session.add(ext)
     await db_session.flush()
     user = User(
@@ -183,10 +183,16 @@ async def test_staff_resolve_delete_with_activities_blocks(db_session) -> None:
     from src.models.activity import Activity
     from src.models.location import Location
     from src.models.service import Service
+    from src.models.specialty import Specialty
 
     staff = await _add_staff(db_session)
-    db_session.add(Master(staff_id=staff.id, specialty="живопись", color="#000000"))
-    service = Service(title="S", description="d", image_url="i", specialty="живопись",
+    db_session.add(Master(staff_id=staff.id, color="#000000"))
+    # GH #599: the direction is a dictionary reference.
+    spec = Specialty(title="Живопись")
+    db_session.add(spec)
+    await db_session.flush()
+    service = Service(title="S", description="d", image_url="i",
+                      specialty_id=spec.id,
                       min_age=6, duration=90, record_info="r")
     location = Location(title="L", capacity=10)
     db_session.add_all([service, location])

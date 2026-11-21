@@ -131,6 +131,7 @@ const servicesFixture: ServiceResponse[] = [
     description: 'Научитесь писать маслом',
     image_url: 'https://example.com/painting.jpg',
     specialty: 'живопись',
+    specialty_id: 'spec-painting',
     min_age: 6,
     max_age: 99,
     duration: 180,

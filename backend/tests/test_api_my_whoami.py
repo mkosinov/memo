@@ -33,7 +33,7 @@ import pytest
 
 from src.auth.permissions import CLIENT_SESSION_COOKIE, SESSION_COOKIE
 from src.errors import ErrorCode
-from tests.conftest import insert_user, query_db_params
+from tests.conftest import insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
 
@@ -53,12 +53,31 @@ def _staff_card(with_section: bool) -> str:
         {"id": staff_id},
     )
     if with_section:
+        # GH #599: masters.specialty (CSV) is dropped — the section's
+        # directions are ``staff_specialties`` links. Find-or-create the
+        # dictionary rows (title is case-insensitively UNIQUE across
+        # tests), then link (same data as the old 'живопись' value).
         query_db_params(
-            "INSERT INTO masters (staff_id, specialty, color, is_active, "
-            "created_at, updated_at) VALUES (:id, 'живопись', '#5B8C7A', 1, "
+            "INSERT INTO masters (staff_id, color, is_active, "
+            "created_at, updated_at) VALUES (:id, '#5B8C7A', 1, "
             "datetime('now'), datetime('now'))",
             {"id": staff_id},
         )
+        for title in ("живопись",):
+            spec = query_db(
+                f"SELECT id FROM specialties WHERE lower(title) = '{title}'"
+            )
+            spec_id = spec[0]["id"] if spec else f"spec-{secrets.token_hex(8)}"
+            if not spec:
+                query_db_params(
+                    "INSERT INTO specialties (id, title, created_at, "
+                    f"updated_at) VALUES ('{spec_id}', '{title}', "
+                    "datetime('now'), datetime('now'))",
+                )
+            query_db_params(
+                "INSERT INTO staff_specialties (staff_id, specialty_id) "
+                f"VALUES ('{staff_id}', '{spec_id}')",
+            )
     return staff_id
 
 

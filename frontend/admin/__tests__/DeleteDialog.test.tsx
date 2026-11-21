@@ -16,7 +16,7 @@ type ArchiveFn = (id: string) => Promise<unknown>;
 
 function renderDialog(props: {
   entityName: string;
-  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag' | 'photo' | 'position' | 'visitor' | 'staff';
+  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag' | 'photo' | 'position' | 'visitor' | 'staff' | 'specialty';
   entityId: string;
   dependencies: DependencyNode[];
   onDone: () => void;
@@ -1099,5 +1099,153 @@ describe('DeleteDialog — #324 visitor (with visits)', () => {
       expect(onResolve).toHaveBeenCalledWith('vis1', { visits: 'cascade' }),
     );
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── GH #599 — specialty dictionary (services tab «Направления») ──────────────
+
+describe('DeleteDialog — #599 specialty (dictionary delete)', () => {
+  // §7 5b — staff-only tree: staff_specialties is AUTO cascade (the
+  // materials pattern — join rows die, staff cards survive).
+  const SPECIALTY_STAFF_ONLY: DependencyNode[] = [
+    {
+      entity: 'staff_specialties', auto: true,
+      relation: 'Сотрудник',
+      count: 2,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [
+        { id: 'st-1', label: 'Анна Иванова' },
+        { id: 'st-2', label: 'Мария Петрова' },
+      ],
+    },
+  ];
+
+  // §7 5a — the BLOCKING services node (FK RESTRICT preview over ALL
+  // services incl. archived) with the backend way-out message.
+  const SPECIALTY_BLOCKED: DependencyNode[] = [
+    {
+      entity: 'services', auto: false,
+      relation: 'Услуга',
+      count: 3,
+      allowed_actions: [],
+      message: 'Переназначьте услуги другому направлению или удалите их',
+    },
+  ];
+
+  it('specialty title: «Удаление «направления Живопись»» (TITLE_BY_TYPE genitive)', () => {
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'specialty',
+      entityId: 'spec-1',
+      dependencies: SPECIALTY_STAFF_ONLY,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/Удаление «направления Живопись»/)).toBeInTheDocument();
+  });
+
+  it('Mode A staff-only: «Сотрудники — потеряют направление:» (cards survive); unconditional «Удалить» carries {} (all-auto)', async () => {
+    const onDone = vi.fn();
+    const { onResolve } = renderDialog({
+      entityName: 'Керамика',
+      entityType: 'specialty',
+      entityId: 'spec-2',
+      dependencies: SPECIALTY_STAFF_ONLY,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-staff_specialties')).toHaveTextContent(
+      'Сотрудники — потеряют направление:',
+    );
+    expect(screen.getByTestId('dep-staff_specialties')).not.toContainHTML('будут удалены');
+    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    expect(screen.getByText('Мария Петрова')).toBeInTheDocument();
+    // All-auto tree → NO confirm checkbox; the button is enabled as-is.
+    expect(screen.queryByTestId('delete-dialog-confirm-checkbox')).not.toBeInTheDocument();
+    expect(screen.getByTestId('delete-dialog-confirm-btn')).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+    // Auto deps stay OUT of the resolutions body (§6 rule 3) — {} on the wire.
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith('spec-2', {}));
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('Mode A counter-line fallback (no items): «→ Сотрудники: 2 (потеряют направление)»', () => {
+    renderDialog({
+      entityName: 'Керамика',
+      entityType: 'specialty',
+      entityId: 'spec-2',
+      dependencies: [
+        { entity: 'staff_specialties', auto: true, relation: 'Сотрудник', count: 2, allowed_actions: ['cascade'], message: null },
+      ],
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-staff_specialties')).toHaveTextContent(
+      '→ Сотрудники: 2 (потеряют направление)',
+    );
+  });
+
+  it('Mode B blocked by services: «Нельзя удалить: есть 3 услуги.» + backend way-out; NO archive, NO delete — «Понятно» only', () => {
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'specialty',
+      entityId: 'spec-1',
+      dependencies: SPECIALTY_BLOCKED,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // The count-word derives from the BLOCKING dep's relation («Услуга»),
+    // not the activities default the archive Mode B was born with.
+    expect(screen.getByTestId('delete-dialog-block-message')).toHaveTextContent(
+      'Нельзя удалить: есть 3 услуги.',
+    );
+    expect(screen.getByTestId('delete-dialog-block-hint')).toHaveTextContent(
+      'Переназначьте услуги другому направлению или удалите их',
+    );
+    // A hard-delete dictionary offers NO archive escape hatch and no delete.
+    expect(screen.queryByTestId('delete-dialog-archive-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('delete-dialog-confirm-btn')).not.toBeInTheDocument();
+    expect(screen.getByText('Понятно')).toBeInTheDocument();
+  });
+
+  it('Mode B plural lookup is per-relation: 1 услуга (not «активность»)', () => {
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'specialty',
+      entityId: 'spec-1',
+      dependencies: SPECIALTY_BLOCKED.map((d) => ({ ...d, count: 1 })),
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('delete-dialog-block-message')).toHaveTextContent(
+      'Нельзя удалить: есть 1 услуга.',
+    );
+  });
+
+  it('«Понятно» closes via onCancel only — onResolve/onArchive/onDone never fire', () => {
+    const onDone = vi.fn();
+    const onCancel = vi.fn();
+    const { onResolve, onArchive } = renderDialog({
+      entityName: 'Живопись',
+      entityType: 'specialty',
+      entityId: 'spec-1',
+      dependencies: SPECIALTY_BLOCKED,
+      onDone,
+      onCancel,
+    });
+
+    fireEvent.click(screen.getByTestId('delete-dialog-ack-btn'));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onResolve).not.toHaveBeenCalled();
+    expect(onArchive).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
   });
 });

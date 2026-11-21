@@ -23,6 +23,7 @@ function makeService(overrides: Partial<ServiceResponse> = {}): ServiceResponse 
     description: 'Мастер-класс по акварели',
     image_url: '',
     specialty: 'Живопись',
+    specialty_id: 'spec-painting',
     min_age: 6,
     max_age: 12,
     duration: 90,

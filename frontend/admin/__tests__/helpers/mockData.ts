@@ -234,7 +234,9 @@ export const mockServiceResponse: ServiceResponse = {
   title: 'Картина маслом',
   description: '',
   image_url: '',
-  specialty: '',
+  // GH #599: dictionary reference + the read-only display string.
+  specialty_id: 'spec-painting',
+  specialty: 'Живопись',
   min_age: 12,
   max_age: 99,
   duration: 150,
@@ -326,6 +328,7 @@ export const mockStaffResponse: StaffResponse = {
   sort_order: 0,
   master: {
     specialty: 'живопись',
+    specialty_ids: ['spec-painting'],
     color: '#5B8C7A',
     archived: false,
     created_at: '2024-01-15T10:00:00Z',
@@ -347,6 +350,7 @@ export const mockStaffResponseArchived: StaffResponse = {
   sort_order: 1,
   master: {
     specialty: 'керамика',
+    specialty_ids: ['spec-ceramics'],
     color: '#6B7E9C',
     archived: true,
     created_at: '2024-01-10T10:00:00Z',

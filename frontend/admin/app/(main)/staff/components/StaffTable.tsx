@@ -13,6 +13,7 @@ import {
   useIssuePasswordLink,
 } from '@/hooks/useStaffMutations';
 import { usePositions } from '@/hooks/usePositions';
+import { useSpecialtiesRaw } from '@/hooks/useSpecialties';
 import { useUI } from '@/contexts/UIContext';
 import { useStaffTable } from '@/contexts/StaffContext';
 import { displayMasterName } from '@/lib/utils';
@@ -40,6 +41,9 @@ export function StaffTable() {
   const staffTable = useStaffTable();
 
   const { data: positions = [] } = usePositions();
+  // GH #599: directions dictionary (/specialties/all) — feeds the StaffModal
+  // master-section checkbox list (usePositions precedent).
+  const { data: specialties = [] } = useSpecialtiesRaw();
 
   const updateStaff = useUpdateStaff();
   const createStaff = useCreateStaff();
@@ -142,7 +146,11 @@ export function StaffTable() {
       last_name: data.last_name,
       avatar_url: data.avatar_url ?? '',
       sort_order: data.sort_order,
-      master: data.master ? { specialty: data.master.specialty, color: data.master.color } : null,
+      // GH #599: the master-section direction set is the id array
+      // (hard-replace M2M) — the display string never travels.
+      master: data.master
+        ? { specialty_ids: data.master.specialty_ids, color: data.master.color }
+        : null,
       position_ids: data.position_ids,
       // D6/#348: create-only account flag — passwordless {phone, role?} | false;
       // D10: role — a sent value beats the backend position template.
@@ -175,10 +183,10 @@ export function StaffTable() {
       sort_order: data.sort_order,
       // `archived` (Gap A) toggles the section's schedule flag WITHOUT
       // deleting the row (D7); `null` removes the section (blocked by
-      // activities server-side).
+      // activities server-side). GH #599: `specialty_ids` — the id set.
       master: data.master
         ? {
-            specialty: data.master.specialty,
+            specialty_ids: data.master.specialty_ids,
             color: data.master.color,
             ...(data.master.archived !== undefined ? { archived: data.master.archived } : {}),
           }
@@ -300,6 +308,7 @@ export function StaffTable() {
           mode="edit"
           staff={editStaff}
           positions={positions}
+          specialties={specialties}
           onSubmit={handleEdit}
           onPatchPhone={handlePatchUserPhone}
           onIssueLink={issueLinkForModal}
@@ -315,6 +324,7 @@ export function StaffTable() {
           mode="create"
           staff={null}
           positions={positions}
+          specialties={specialties}
           onSubmit={handleCreateSubmit}
           onClose={() => setCreating(false)}
           title="Новый сотрудник"

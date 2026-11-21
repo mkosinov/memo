@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useId } from 'react';
-import type { StaffResponse, PositionResponse, UserRole } from '@memo/api-client';
+import type { StaffResponse, PositionResponse, SpecialtyResponse, UserRole } from '@memo/api-client';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import {
   PhoneField,
@@ -21,7 +21,9 @@ import {
  * which maps it onto the typed wire schemas (StaffCreate / StaffUpdate).
  *
  * - `master`: null = no section (create) / remove section (edit, D7 — blocked
- *   by activities server-side); a payload = upsert. `archived` is the schedule
+ *   by activities server-side); a payload = upsert. GH #599: the section's
+ *   direction set travels as `specialty_ids` (hard-replace M2M — the display
+ *   title string is read-only on the response). `archived` is the schedule
  *   flag (D3/Gap A) — sent in edit to toggle the section's archive without
  *   deleting the row; omitted in create (a fresh section is born active).
  * - `create_user`: create-only (D6) — `{phone, role?}` or false. NO PASSWORD
@@ -37,7 +39,7 @@ export interface StaffFormData {
   avatar_url: string | null;
   sort_order: number;
   position_ids: string[];
-  master: { specialty: string; color: string; archived?: boolean } | null;
+  master: { specialty_ids: string[]; color: string; archived?: boolean } | null;
   create_user: { phone: string; role?: UserRole } | false;
   role?: UserRole;
 }
@@ -48,6 +50,8 @@ export interface StaffModalProps {
   staff: StaffResponse | null;
   /** Positions dictionary (D4) — checkbox list. */
   positions: PositionResponse[];
+  /** Specialties dictionary (GH #599) — master-section checkbox list. */
+  specialties: SpecialtyResponse[];
   onSubmit: (data: StaffFormData) => Promise<void>;
   onClose: () => void;
   title: string;
@@ -174,6 +178,7 @@ export function StaffModal({
   mode,
   staff,
   positions,
+  specialties,
   onSubmit,
   onPatchPhone,
   onIssueLink,
@@ -205,11 +210,15 @@ export function StaffModal({
 
   // ─── Master section (D5) ────────────────────────────────────────────────
   // `masterEnabled` = the section is present. Edit pre-fills from staff.master;
-  // create starts off (toggled by «Сделать мастером»).
+  // create starts off (toggled by «Сделать мастером»). GH #599: the direction
+  // set is a checkbox selection of dictionary ids (specialty_ids); the
+  // alphabetical display string is joined server-side on read.
   const [masterEnabled, setMasterEnabled] = useState<boolean>(
     mode === 'edit' ? staff?.master != null : false,
   );
-  const [specialty, setSpecialty] = useState(staff?.master?.specialty ?? '');
+  const [specialtyIds, setSpecialtyIds] = useState<string[]>(
+    staff?.master?.specialty_ids ?? [],
+  );
   const [color, setColor] = useState(staff?.master?.color ?? '#5B8C7A');
   // Schedule flag of an EXISTING section (D3). Edit-only; create defaults active.
   const [masterArchived, setMasterArchived] = useState<boolean>(staff?.master?.archived ?? false);
@@ -286,6 +295,16 @@ export function StaffModal({
     if (suggested && !roleDirty) setRole(suggested);
   }, [markDirty, positionIds, roleDirty]);
 
+  // GH #599: dictionary checkbox toggle — selection order follows the click
+  // order (the wire keeps it; the DISPLAY string is alphabetical, joined
+  // server-side — spec §7 scenario 2).
+  const toggleSpecialty = useCallback((id: string) => {
+    markDirty();
+    setSpecialtyIds((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
+    );
+  }, [markDirty]);
+
   // ─── Link issuance (S3 button / S1 retry) ───────────────────────────────
   const issueFor = useCallback(
     async (userId: string) => {
@@ -319,8 +338,10 @@ export function StaffModal({
     if (!firstName.trim()) next.first_name = 'Обязательное поле';
     if (!lastName.trim()) next.last_name = 'Обязательное поле';
     if (masterEnabled) {
-      // D5: specialty + color required for a master.
-      if (!specialty.trim()) next.specialty = 'Обязательное поле';
+      // D5: ≥1 direction + color required for a master. GH #599: the
+      // direction set is the checkbox selection — empty set = required error
+      // (the server raises the same SPECIALTY_REQUIRED on a live section).
+      if (specialtyIds.length === 0) next.specialty = 'Обязательное поле';
       if (!color.trim()) next.color = 'Обязательное поле';
     }
     // GH #414 (spec §Форматирование — the #348 bullet): the completeness
@@ -345,7 +366,7 @@ export function StaffModal({
     firstName,
     lastName,
     masterEnabled,
-    specialty,
+    specialtyIds,
     color,
     mode,
     createUserEnabled,
@@ -395,7 +416,10 @@ export function StaffModal({
       }
       const master = masterEnabled
         ? {
-            specialty: specialty.trim(),
+            // GH #599: hard-replace id set — the click order travels as is;
+            // duplicates are impossible (checkboxes), the server dedupes and
+            // caps (>50) anyway. The display string never travels.
+            specialty_ids: specialtyIds,
             color: color.trim(),
             // Edit toggles the schedule flag explicitly; create omits it (born active).
             ...(mode === 'edit' ? { archived: masterArchived } : {}),
@@ -580,23 +604,43 @@ export function StaffModal({
                 className="w-4 h-4 rounded border-gray-300 accent-[var(--brand)] cursor-pointer"
               />
               <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                {mode === 'create' ? 'Сделать мастером (специальность + цвет)' : 'Мастер (расписание)'}
+                {mode === 'create' ? 'Сделать мастером (направления + цвет)' : 'Мастер (расписание)'}
               </span>
             </label>
 
             {masterEnabled && (
               <div className="mt-3 space-y-3 pl-6">
+                {/* GH #599: directions — dictionary checkboxes (positions
+                    pattern); manual input impossible. D5: ≥1 required. */}
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor={`${baseId}-specialty`}>Специальность *</Label>
-                  <input
-                    id={`${baseId}-specialty`}
-                    type="text"
-                    value={specialty}
-                    onChange={(e) => { setSpecialty(e.target.value); markDirty(); }}
-                    placeholder="живопись, керамика"
-                    className={TEXT_INPUT}
-                    style={{ borderColor: errors.specialty ? 'var(--danger)' : 'var(--line)', color: 'var(--ink)' }}
-                  />
+                  <span className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>
+                    Направления *
+                  </span>
+                  {specialties.length === 0 ? (
+                    <p className="text-sm" style={{ color: 'var(--ink-light)' }}>
+                      Словарь направлений пуст.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {specialties.map((s) => {
+                        const cbId = `${baseId}-spec-${s.id}`;
+                        const checked = specialtyIds.includes(s.id);
+                        return (
+                          <label key={s.id} className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              id={cbId}
+                              type="checkbox"
+                              data-testid={`specialty-checkbox-${s.id}`}
+                              checked={checked}
+                              onChange={() => toggleSpecialty(s.id)}
+                              className="w-4 h-4 rounded border-gray-300 accent-[var(--brand)] cursor-pointer"
+                            />
+                            <span className="text-sm" style={{ color: 'var(--ink)' }}>{s.title}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
                   {errorEl('specialty')}
                 </div>
                 <div className="flex flex-col gap-1">

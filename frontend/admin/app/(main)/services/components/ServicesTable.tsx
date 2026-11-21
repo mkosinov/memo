@@ -66,7 +66,9 @@ export function ServicesTable() {
       title: data.title as string,
       description: (data.description as string | null | undefined) ?? '',
       image_url: (data.image_url as string | null | undefined) ?? '',
-      specialty: (data.specialty as string | null | undefined) ?? '',
+      // GH #599: the direction travels as the dictionary reference id —
+      // the display title string is read-only on the response.
+      specialty_id: (data.specialty_id as string | null | undefined) ?? '',
       min_age: (data.min_age as number | null | undefined) ?? 0,
       // GH #203: no coercion — an empty «Возраст до» is `null` = «без
       // ограничения»; the server schema is int | None.

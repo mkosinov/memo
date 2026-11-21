@@ -61,6 +61,7 @@ function makeService(id: string, overrides: Partial<ServiceResponse> = {}): Serv
     description: '',
     image_url: '',
     specialty: '',
+    specialty_id: 'spec-painting',
     min_age: 0,
     max_age: null,
     duration: 60,

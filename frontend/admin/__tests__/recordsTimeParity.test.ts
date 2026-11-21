@@ -41,6 +41,7 @@ const mockService: ServiceResponse = {
   description: '',
   image_url: '',
   specialty: 'ceramics',
+  specialty_id: 'spec-ceramics',
   min_age: 6,
   max_age: 99,
   duration: 120,

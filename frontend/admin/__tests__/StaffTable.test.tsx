@@ -8,7 +8,7 @@ import {
   mockStaffResponseNoMaster,
   createMockStaffResponse,
 } from './helpers/mockData';
-import type { DependencyNode, StaffResponse, PaginatedResponse, PositionResponse } from '@memo/api-client';
+import type { DependencyNode, StaffResponse, PaginatedResponse, PositionResponse, SpecialtyResponse } from '@memo/api-client';
 
 // ─── Dependency tree fixtures (mirror backend src/domain/deletion.py Staff) ──
 
@@ -120,6 +120,16 @@ const POSITIONS: PositionResponse[] = [
 ];
 vi.mock('@/hooks/usePositions', () => ({
   usePositions: vi.fn(() => ({ data: POSITIONS, isLoading: false })),
+}));
+
+// GH #599: the directions dictionary (/specialties/all) feeds the StaffModal
+// master-section checkbox list — the shared helper fixtures.
+const SPECIALTIES: SpecialtyResponse[] = [
+  { id: 'spec-painting', title: 'Живопись', created_at: '', updated_at: '' },
+  { id: 'spec-ceramics', title: 'Керамика', created_at: '', updated_at: '' },
+];
+vi.mock('@/hooks/useSpecialties', () => ({
+  useSpecialtiesRaw: vi.fn(() => ({ data: SPECIALTIES, isLoading: false })),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -517,9 +527,10 @@ describe('StaffTable', () => {
     const [callArg] = updateMutateAsync.mock.calls[0];
     expect(callArg.id).toBe('m1');
     expect((callArg.data as Record<string, unknown>).is_active).toBeUndefined();
-    // The master section round-trips through the payload (specialty + color).
+    // The master section round-trips through the payload (GH #599: the
+    // direction set travels as specialty_ids — the display string doesn't).
     expect((callArg.data as Record<string, unknown>).master).toMatchObject({
-      specialty: 'живопись', color: '#5B8C7A',
+      specialty_ids: ['spec-painting'], color: '#5B8C7A',
     });
     expect((callArg.data as Record<string, unknown>).position_ids).toEqual(['master']);
   });

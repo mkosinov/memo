@@ -39,6 +39,7 @@ function makeService(id: string, title: string): ServiceResponse {
     description: '',
     image_url: '',
     specialty: '',
+    specialty_id: 'spec-painting',
     min_age: 0,
     max_age: null,
     duration: 60,

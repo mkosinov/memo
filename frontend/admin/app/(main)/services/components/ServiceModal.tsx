@@ -8,6 +8,7 @@ import {
 import { Modal } from '@/app/components/shared/modal/Modal';
 import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
 import { useMaterialsRaw } from '@/hooks/useMaterials';
+import { useSpecialtiesRaw } from '@/hooks/useSpecialties';
 import { getTags } from '@memo/api-client';
 import type { ServiceMaterialLink } from '@memo/api-client';
 
@@ -223,6 +224,68 @@ function FieldRenderer({ field, value, onChange, error, selectAriaLabel }: Field
     default:
       return null;
   }
+}
+
+/* ── Local specialty dictionary select (GH #599) ──────────────────── */
+
+interface SpecialtyFieldProps {
+  field: Extract<ServiceFieldConfig, { type: 'specialty' }>;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string;
+}
+
+/**
+ * Single-choice dictionary select for the service direction: options come
+ * from useSpecialtiesRaw (/specialties/all, fixed server order title ASC,
+ * id ASC) in the order received — manual input is impossible (a native
+ * select, no free text). The '' option is the empty state
+ * («Выберите направление...»); required validation lives in the modal's
+ * shared validate() (the field config carries required: true).
+ */
+function SpecialtyField({ field, value, onChange, error }: SpecialtyFieldProps) {
+  const { baseId } = useBaseInputClasses();
+  const { data: specialties = [] } = useSpecialtiesRaw();
+  const selectId = `${baseId}-${field.key}`;
+  const errorId = `${selectId}-error`;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label
+        htmlFor={selectId}
+        className="text-xs font-medium"
+        style={{ color: 'var(--ink-light)' }}
+      >
+        {field.label}
+        <span className="text-red-500 ml-0.5">*</span>
+      </label>
+      <select
+        id={selectId}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        aria-describedby={error ? errorId : undefined}
+        data-testid="service-specialty-select"
+        className="w-full rounded-lg border px-3 py-2 text-sm transition-colors"
+        style={{
+          borderColor: error ? 'var(--danger)' : 'var(--line)',
+          backgroundColor: 'var(--white)',
+          color: 'var(--ink)',
+        }}
+      >
+        <option value="">{field.emptyOptionLabel}</option>
+        {specialties.map((s) => (
+          <option key={s.id} value={s.id} data-testid={`specialty-option-${s.id}`}>
+            {s.title}
+          </option>
+        ))}
+      </select>
+      {error ? (
+        <span className="text-xs" style={{ color: 'var(--danger)' }} id={errorId}>
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 /* ── Local nested list for tariffs ───────────────────────────────── */
@@ -686,6 +749,17 @@ export function ServiceModal({
                   field={field}
                   value={(formData[field.key] as MaterialLinkState[]) ?? []}
                   onChange={(links) => handleChange(field.key, links)}
+                />
+              );
+            }
+            if (field.type === 'specialty') {
+              return (
+                <SpecialtyField
+                  key={field.key}
+                  field={field}
+                  value={(formData[field.key] as string) ?? ''}
+                  onChange={(v) => handleChange(field.key, v)}
+                  error={errors[field.key]}
                 />
               );
             }

@@ -157,7 +157,7 @@ describe('useStaffMutations', () => {
         last_name: 'Иванов',
         avatar_url: '',
         sort_order: 0,
-        master: { specialty: 'живопись', color: '#AABBCC' },
+        master: { specialty_ids: ['spec-painting'], color: '#AABBCC' },
         position_ids: ['master'],
       };
 

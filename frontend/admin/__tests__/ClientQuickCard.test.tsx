@@ -49,6 +49,7 @@ const service1: ServiceResponse = {
   description: '',
   image_url: '',
   specialty: '',
+  specialty_id: 'spec-painting',
   min_age: 12,
   max_age: 99,
   duration: 150,

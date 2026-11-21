@@ -85,6 +85,24 @@ interface TagsFieldConfig {
   placeholder?: string;
 }
 
+/**
+ * GH #599: the service direction — a single-choice dictionary SELECT from
+ * /specialties/all (manual input impossible). Options are supplied by the
+ * modal (dictionary-backed via useSpecialtiesRaw), NOT stored here — the
+ * config stays a pure description of the form shape (materials precedent).
+ * Form state key is `specialty_id` (the wire reference); the display title
+ * string is read-only on the response.
+ */
+export interface SpecialtyFieldConfig {
+  type: 'specialty';
+  key: 'specialty_id';
+  label: string;
+  /** The direction is NOT NULL server-side — always required. */
+  required: true;
+  /** Placeholder option of the empty state (value ''). */
+  emptyOptionLabel: string;
+}
+
 export type ServiceFieldConfig =
   | TextFieldConfig
   | NumberFieldConfig
@@ -92,7 +110,8 @@ export type ServiceFieldConfig =
   | NestedListFieldConfig
   | MaterialsFieldConfig
   | SelectFieldConfig
-  | TagsFieldConfig;
+  | TagsFieldConfig
+  | SpecialtyFieldConfig;
 
 export const SERVICE_FIELDS: ServiceFieldConfig[] = [
   {
@@ -110,10 +129,14 @@ export const SERVICE_FIELDS: ServiceFieldConfig[] = [
     placeholder: 'Описание услуги...',
   },
   {
-    type: 'text',
-    key: 'specialty',
-    label: 'Специализация',
-    placeholder: 'Живопись, Графика...',
+    // GH #599: dictionary select from /specialties/all — replaces the free
+    // -text «Специализация» input. Required: a service always references
+    // exactly one direction (NOT NULL FK server-side).
+    type: 'specialty',
+    key: 'specialty_id',
+    label: 'Направление',
+    required: true,
+    emptyOptionLabel: 'Выберите направление...',
   },
   {
     type: 'number',

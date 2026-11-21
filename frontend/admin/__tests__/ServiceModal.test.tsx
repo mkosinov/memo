@@ -3,12 +3,23 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import React from 'react';
 import { ServiceModal } from '../app/(main)/services/components/ServiceModal';
 import type { ServiceModalProps } from '../app/(main)/services/components/ServiceModal';
+import { mockSpecialties } from './helpers/mockData';
+import type { SpecialtyResponse } from '@memo/api-client';
 
 // ServiceModal's materials picker reads the materials dictionary through
 // useMaterialsRaw — the modal-level scenarios here don't exercise it, so a
 // static empty list is enough (ServicesTable.test.tsx covers the picker).
 vi.mock('@/hooks/useMaterials', () => ({
   useMaterialsRaw: () => ({ data: [] }),
+}));
+
+// GH #599: the «Направление» field is a dictionary select fed by
+// useSpecialtiesRaw (/specialties/all). Mutable list — the default is the
+// seed dictionary (non-empty is the guaranteed state, spec §6); the
+// empty-dictionary scenario swaps it per test.
+let mockSpecialtiesData: SpecialtyResponse[] = mockSpecialties;
+vi.mock('@/hooks/useSpecialties', () => ({
+  useSpecialtiesRaw: () => ({ data: mockSpecialtiesData }),
 }));
 
 // GH #328: the tags picker searches via getTags — and the modal-level
@@ -36,6 +47,7 @@ const NULL_AGE_SERVICE: Record<string, unknown> = {
   description: 'Лепка из глины',
   image_url: '',
   specialty: 'Керамика',
+  specialty_id: 'spec-ceramics',
   min_age: 5,
   max_age: null,
   duration: 90,
@@ -117,6 +129,8 @@ function renderCreateWithTariff() {
   });
   changeValue(inputByLabel(/^Название/), 'Новая услуга');
   changeValue(inputByLabel(/Длительность/), '90');
+  // GH #599: the direction select is required — pick the first entry.
+  fireEvent.change(screen.getByLabelText(/^Направление/), { target: { value: 'spec-painting' } });
   fireEvent.click(screen.getByRole('button', { name: '+ Добавить тариф' }));
   // Tariff fields duplicate the top-level «Название» label — tariff one is [1].
   changeValue(inputByLabel(/^Название/, 1), 'Базовый');
@@ -636,5 +650,74 @@ describe('ServiceModal — tags field (GH #328)', () => {
     await waitFor(() => {
       expect(mockGetTags).toHaveBeenCalledWith({ q: 'Ак', per_page: 10 });
     });
+  });
+});
+
+// ─── GH #599: «Направление» — dictionary select from /specialties/all ──────
+
+describe('ServiceModal — specialty dictionary select (GH #599)', () => {
+  /** The select behind the visible «Направление *» label. */
+  function specialtySelect(): HTMLSelectElement {
+    return screen.getByLabelText(/^Направление/) as HTMLSelectElement;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSpecialtiesData = mockSpecialties;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    mockSpecialtiesData = mockSpecialties;
+  });
+
+  it('render-fact: a SELECT (no free-text input) offering the dictionary in server order', () => {
+    renderModal();
+
+    const select = specialtySelect();
+    expect(select.tagName).toBe('SELECT');
+    // Placeholder «—» option + dictionary titles (server order title ASC).
+    expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
+      ['', 'Выберите направление...'],
+      ['spec-painting', 'Живопись'],
+      ['spec-ceramics', 'Керамика'],
+    ]);
+    // The label binds to the select (a11y — the FieldRenderer contract).
+    const label = screen.getByText(/^Направление/, { selector: 'label' });
+    expect(label).toHaveAttribute('for', select.id);
+  });
+
+  it('edit prefill: service.specialty_id is the selected option', () => {
+    renderModal();
+
+    expect(specialtySelect().value).toBe('spec-ceramics');
+  });
+
+  it('create without a direction → «Обязательное поле» under the select, no submit', () => {
+    const { onSubmit } = renderModal({ service: null, title: 'Новая услуга' });
+
+    changeValue(inputByLabel(/^Название/), 'Новая услуга');
+    changeValue(inputByLabel(/Длительность/), '90');
+    clickSave();
+
+    expect(
+      errorTextFor(specialtySelect() as unknown as HTMLInputElement),
+    ).toBe('Обязательное поле');
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('create with a chosen direction → payload carries specialty_id, never a title string', async () => {
+    const { onSubmit } = renderModal({ service: null, title: 'Новая услуга' });
+
+    changeValue(inputByLabel(/^Название/), 'Новая услуга');
+    changeValue(inputByLabel(/Длительность/), '90');
+    fireEvent.change(specialtySelect(), { target: { value: 'spec-painting' } });
+    clickSave();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.specialty_id).toBe('spec-painting');
+    // The display title never travels — the wire is the id reference only.
+    expect('specialty' in payload).toBe(false);
   });
 });

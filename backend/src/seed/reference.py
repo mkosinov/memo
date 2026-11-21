@@ -823,54 +823,45 @@ def _load_csv_data(parsed: _ParsedCsv) -> ReferenceData:
     specialty_titles = {title.lower() for title in data.specialties}
     for location in data.locations:
         line = line_by_entity[("locations", location.title)]
-        _check_refs(
-            f"locations «{location.title}»",
-            location.tags,
-            tag_titles,
-            "tags",
-            line,
-        )
+        _check_refs(f"locations «{location.title}»", location.tags, tag_titles, "tags", line)
     for service in data.services:
         line = line_by_entity[("services", service.title)]
         _check_refs(f"services «{service.title}»", service.tags, tag_titles, "tags", line)
+        # GH #612 §6 №7: validation-stage mirror of the apply-layer error
+        # (``_apply_services``) — ``--check`` catches an unknown title
+        # reference before any DB work; the resolve itself is
+        # case-insensitive (``lower(title)``, the #599 contract).
         if service.specialty.lower() not in specialty_titles:
-            _check_refs(
-                f"services «{service.title}»",
-                [service.specialty],
-                specialty_titles,
-                "specialty",
-                line,
+            raise SeedDataError(
+                f"строка {line}: services «{service.title}»: направление "
+                f"«{service.specialty}» не найдено в справочнике. "
+                f"Объявите его в секции specialty или поправьте название"
             )
     for person in data.staff:
         identity = f"{person.first_name} {person.last_name}"
         line = line_by_entity[("staff", identity)]
-        _check_refs(
-            f"staff «{identity}»",
-            person.positions,
-            position_titles,
-            "positions",
-            line,
-        )
+        # GH #612 §6 №6: NEW cross-check mirroring the apply-layer error
+        # text (``_apply_staff``) — the validation-stage twin catches an
+        # undeclared position on ``--check``, before any DB work.
+        for title in person.positions:
+            if title not in position_titles:
+                raise SeedDataError(
+                    f"строка {line}: staff «{identity}»: должность «{title}» не найдена. "
+                    f"Объявите её в блоке positions или поправьте название"
+                )
         if person.master is None:
             continue
-        _check_refs(
-            f"staff «{identity}»",
-            person.master.tags,
-            tag_titles,
-            "tags",
-            line,
-        )
-        unknown_specialties = [
-            title for title in person.master.specialties if title.lower() not in specialty_titles
-        ]
-        if unknown_specialties:
-            _check_refs(
-                f"staff «{identity}»",
-                unknown_specialties,
-                specialty_titles,
-                "specialty",
-                line,
-            )
+        _check_refs(f"staff «{identity}»", person.master.tags, tag_titles, "tags", line)
+        # GH #612 §6 №7: the ``_apply_staff`` mirror for master-block
+        # direction references (case-insensitive resolve, unknown title
+        # names the value).
+        for title in person.master.specialties:
+            if title.lower() not in specialty_titles:
+                raise SeedDataError(
+                    f"строка {line}: staff «{identity}»: направление «{title}» "
+                    f"не найдено в справочнике. Объявите его в секции specialty "
+                    f"или поправьте название"
+                )
 
     print(
         f"  локаций {len(data.locations)}, услуг {len(data.services)}, "

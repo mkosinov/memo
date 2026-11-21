@@ -243,6 +243,10 @@ def test_bad_integer_reports_starting_csv_line(csv_path: Path) -> None:
 
 
 def test_unknown_staff_position_fails_during_check(csv_path: Path) -> None:
+    """Spec §6 №6: an undeclared staff position is a VALIDATION-stage
+    error whose text mirrors the apply layer («должность … не найдена …
+    блоке positions», #612 Task 2) — and ``--check`` (no DB) catches it
+    with exit 1."""
     text = csv_path.read_text(encoding="utf-8")
     text = text.replace(
         ';Алексей;Примеров;0;;"Мастер;Администратор";',
@@ -250,8 +254,127 @@ def test_unknown_staff_position_fails_during_check(csv_path: Path) -> None:
     )
     csv_path.write_text(text, encoding="utf-8")
 
-    with pytest.raises(SeedDataError, match=r"строка .*Неизвестная.*секц.*positions"):
+    with pytest.raises(SeedDataError) as exc_info:
         load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 23: ")
+    assert (
+        "staff «Алексей Примеров»: должность «Неизвестная» не найдена. "
+        "Объявите её в блоке positions или поправьте название" in message
+    )
+    assert main(["--csv", str(csv_path), "--check"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 items №6–№7 (issue #612 Task 2): cross-reference validation runs
+# on the CSV-assembled ReferenceData BEFORE any DB work (--check-visible);
+# positions/specialty errors mirror the apply-layer texts, service and
+# material references carry the referencing row's line.
+# ---------------------------------------------------------------------------
+
+
+def test_tariff_reference_to_unknown_service_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №6: a tariffs row pointing at a service missing from the
+    services section is a load error naming the service, with the tariff
+    row's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all",
+            ";Неизвестная услуга;Обычный;Демонстрационный тариф;1000;all",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 19: ")
+    assert "услуга «Неизвестная услуга» из tariffs не найдена в секции services" in message
+
+
+def test_service_materials_unknown_material_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №6: a service_materials row naming a material missing from
+    the materials section is a load error naming the material, with the
+    row's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
+            ";Линогравюра для примера;Неизвестный материал;",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 15: ")
+    assert "материал «Неизвестный материал» не найден в секции materials" in message
+
+
+def test_service_materials_unknown_service_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №5 branch: a service_materials link referencing a service
+    that does not exist anywhere in the file is a load error naming the
+    service, with the referencing row's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
+            ";Неизвестная услуга;Учебный материал;",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 15: ")
+    assert (
+        "услуга «Неизвестная услуга» из service_materials "
+        "не найдена в секции services" in message
+    )
+
+
+def test_unknown_service_specialty_fails_naming_value(csv_path: Path) -> None:
+    """Spec §6 №7: a ``services.specialty`` title absent from the specialty
+    section is a VALIDATION-stage error naming the value — the mirror of
+    the apply-layer «не найдено в справочнике» text (case-insensitive
+    resolve, so «Графика» in any case passes; «Батик» must not)."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(";Графика;8;;90;;пример", ";Батик;8;;90;;пример"), encoding="utf-8"
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 7: ")
+    assert (
+        "services «Линогравюра для примера»: направление «Батик» "
+        "не найдено в справочнике. Объявите его в секции specialty "
+        "или поправьте название" in message
+    )
+
+
+def test_unknown_master_specialty_fails_naming_value(csv_path: Path) -> None:
+    """Spec §6 №7: a ``master_specialty`` title absent from the specialty
+    section is a validation-stage error naming the person and the value —
+    the apply-layer mirror (D5 keeps requiring ≥1 live direction)."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace('"Графика;Моделирование"', '"Графика;Батик"'), encoding="utf-8"
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 23: ")
+    assert (
+        "staff «Алексей Примеров»: направление «Батик» "
+        "не найдено в справочнике. Объявите его в секции specialty "
+        "или поправьте название" in message
+    )
 
 
 def test_master_block_requires_specialty_and_color(csv_path: Path) -> None:

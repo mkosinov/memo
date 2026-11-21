@@ -59,8 +59,13 @@ async function firstItems(ctx: APIRequestContext, path: string): Promise<Array<R
 /**
  * Create a bookable activity TOMORROW at 12:00 UTC (the first seed
  * master/service/location — the admin donor's payload), return its id.
+ *
+ * GH #551: `overrides.capacity` — the factory default is 8; pass 0 to
+ * plant a CLOSED activity («запись закрыта», booking → 409).
  */
-export async function createTomorrowActivity(): Promise<TestActivity> {
+export async function createTomorrowActivity(
+  overrides?: { capacity?: number },
+): Promise<TestActivity> {
   const ctx = await adminContext();
   try {
     const [masters, services, locations] = await Promise.all([
@@ -83,7 +88,7 @@ export async function createTomorrowActivity(): Promise<TestActivity> {
         location_id: locations[0].id,
         start: `${tomorrow}T12:00:00`,
         duration: services[0].duration || 90,
-        capacity: 8,
+        capacity: overrides?.capacity ?? 8,
         is_private: false,
       },
     });

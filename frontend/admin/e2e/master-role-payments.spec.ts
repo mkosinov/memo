@@ -67,6 +67,11 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
   test('create → Частично; top-up → Оплачено; delete → back to Не оплачено', async ({
     page,
   }) => {
+    // Known-slow acceptance test: 4 full page navigations (records + 3
+    // schedule rounds) + the deferred payment DELETE's 5 s undo window —
+    // ~54 s isolated, tipping past the 60 s default under suite load.
+    // Timeout bump per the cabinet.spec.ts precedent (120/150 s).
+    test.setTimeout(120_000);
     const admin = await adminApiContext();
     // OWN fixtures (admin pen — no activities:write on the master token):
     // one visit at 3500 ₽, no payments → the badge starts «Не оплачено».

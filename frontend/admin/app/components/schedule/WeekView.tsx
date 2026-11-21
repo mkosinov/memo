@@ -77,6 +77,9 @@ export function WeekView() {
       const firstLocation = stamp.locations.values().next().value as string;
       const location = locations.find((l) => l.id === firstLocation);
 
+      // Вариант C (GH #551, US-7 рев.4): 0 копируется как есть — это легальное
+      // «запись закрыта»; громкий тост объясняет, откуда взялся ноль.
+      const capacity = location?.defaultCapacity ?? 0;
       addActivity({
         dayIndex,
         masterId: stamp.masterId,
@@ -84,11 +87,16 @@ export function WeekView() {
         locationId: firstLocation,
         startMinutes,
         durationMinutes: service.durationMinutes,
-        capacity: location?.defaultCapacity ?? 0,
+        capacity,
         isPrivate: false,
       });
 
-      showToast(`Создано: ${service.name} — ${DAYS[dayIndex]} ${formatTime(startMinutes)}`);
+      const createdLabel = `Создано: ${service.name} — ${DAYS[dayIndex]} ${formatTime(startMinutes)}`;
+      showToast(
+        capacity === 0 && location
+          ? `${createdLabel} — запись закрыта (у зала «${location.title}» не задана вместимость)`
+          : createdLabel,
+      );
     },
     [stamp, services, locations, addActivity, showToast],
   );

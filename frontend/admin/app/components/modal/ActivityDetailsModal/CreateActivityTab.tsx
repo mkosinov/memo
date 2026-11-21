@@ -75,8 +75,10 @@ function hasDefault(loc: Location): boolean {
  * длительность/приватность), saving-лок до allSettled. Занятие создаётся на
  * ВЫБРАННУЮ дату — из значения поля, не «открытая неделя + день недели».
  * Услуга/набор локаций авто-заполняют длительность/вместимость
- * (domain-rules/activities.md); вместимость ≥ 1 — путь «пустое поле → 0 в
- * payload» исчез. Конфликт-валидации нет (D8). Формы (<form>) здесь нет и
+ * (domain-rules/activities.md); вместимость 0–99 — ввод ЯВНЫЙ (пустое поле
+ * блокирует «Создать» и не шлёт 0; явный 0 = «запись закрыта» — GH #551;
+ * умолчание локации копируется только при >= 1, канон #595 rev.3).
+ * Конфликт-валидации нет (D8). Формы (<form>) здесь нет и
  * не вводится — Enter-отправка не заявлена (её нет и сегодня).
  */
 export function CreateActivityTab({
@@ -116,10 +118,11 @@ export function CreateActivityTab({
     ? checkedLocations.find((l) => !hasDefault(l))
     : undefined;
 
-  // Валидация (GH #280 spec §52 + GH #595 §4.1–§4.2): дата-время непусто;
-  // «ЧЧ:ММ» разбирается и > 0; ≥1 отмеченной локации; вместимость — при
-  // ровно 1 поле ≥ 1 (Number('') = 0 — пустое поле блокирует), при 2+ у
-  // каждой отмеченной есть умолчание.
+  // Валидация (GH #280 spec §52 + GH #595 §4.1–§4.2 + GH #551): дата-время
+  // непусто; «ЧЧ:ММ» разбирается и > 0; ≥1 отмеченной локации; вместимость —
+  // при ровно 1 введена ЯВНО в диапазоне 0–99 (пустое поле блокирует и
+  // никогда не шлёт 0; явный 0 = «запись закрыта», GH #551), при 2+ у каждой
+  // отмеченной есть умолчание.
   const durationMinutes = hhmmToMinutes(durationStr);
   const durationValid = Number.isFinite(durationMinutes) && durationMinutes > 0;
   const canSave =
@@ -128,7 +131,9 @@ export function CreateActivityTab({
     checkedLocations.length >= 1 &&
     !!startDateTime &&
     durationValid &&
-    (capacityHidden ? firstWithoutDefault === undefined : Number(capacity) >= 1);
+    (capacityHidden
+      ? firstWithoutDefault === undefined
+      : capacity !== '' && Number(capacity) >= 0 && Number(capacity) <= 99);
 
   const capacityHint: string | undefined = capacityHidden
     ? firstWithoutDefault
@@ -165,13 +170,17 @@ export function CreateActivityTab({
   // Единое правило §4.2: ЛЮБОЙ переход набора к ровно 1 (клик, рефетч,
   // префилл) автозаполняет вместимость умолчанием оставшейся локации —
   // повторная смена набора до ровно 1 перезаписывает ручный ввод; нет
-  // умолчания → 0 → блокировка до ручного ввода (канон #280).
+  // умолчания (поле отсутствует ИЛИ 0 — канон #595 rev.3, GH #551) →
+  // ПУСТОЕ поле → блокировка «Создать» до ручного ввода (молчаливый
+  // 0 = «запись закрыта» никогда не подставляется).
   const applyLocationSet = useCallback(
     (next: string[]) => {
       setLocationIds(next);
       if (next.length === 1) {
         const loc = locations.find((l) => l.id === next[0]);
-        setCapacity(loc?.defaultCapacity ?? 0);
+        // Копируем умолчание в поле только при >= 1 (канон #595), иначе ''.
+        const def = loc?.defaultCapacity;
+        setCapacity(def !== undefined && def >= 1 ? def : '');
       }
     },
     [locations],

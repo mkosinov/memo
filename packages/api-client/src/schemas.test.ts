@@ -1152,6 +1152,13 @@ describe('LocationResponseSchema', () => {
     const result = LocationResponseSchema.parse(data);
     expect(result.short_title).toBeNull();
   });
+
+  // GH #551: read stays unbounded — legacy rows above the 0–99 write bound
+  // (e.g. capacity 150 written before rev.3) must keep parsing.
+  it('parses a legacy capacity above 99 (read unbounded, GH #551)', () => {
+    const result = LocationResponseSchema.parse({ ...validLocation, capacity: 150 });
+    expect(result.capacity).toBe(150);
+  });
 });
 
 // ─── ServiceResponse ────────────────────────────────────────────────────────
@@ -1375,6 +1382,18 @@ describe('ActivityCreateSchema', () => {
   it('rejects missing required fields', () => {
     const { master_id, ...without } = validActivityCreate;
     expect(() => ActivityCreateSchema.parse(without)).toThrow();
+  });
+
+  // ─── GH #551: write bounds 0–99 (0 = «запись закрыта») ───
+  // ActivityPatchSchema inherits via .partial(); response schemas stay unbounded.
+  it('accepts capacity 0 and 99 (write bounds 0–99, GH #551)', () => {
+    expect(ActivityCreateSchema.parse({ ...validActivityCreate, capacity: 0 }).capacity).toBe(0);
+    expect(ActivityCreateSchema.parse({ ...validActivityCreate, capacity: 99 }).capacity).toBe(99);
+  });
+
+  it('rejects capacity -1 and 100 (write bounds 0–99, GH #551)', () => {
+    expect(() => ActivityCreateSchema.parse({ ...validActivityCreate, capacity: -1 })).toThrow();
+    expect(() => ActivityCreateSchema.parse({ ...validActivityCreate, capacity: 100 })).toThrow();
   });
 });
 
@@ -2413,9 +2432,21 @@ describe('LocationCreateSchema', () => {
     expect(() => LocationCreateSchema.parse(data)).toThrow();
   });
 
-  it('rejects capacity < 1', () => {
-    const data = { title: 'Пустая', capacity: 0 };
-    expect(() => LocationCreateSchema.parse(data)).toThrow();
+  // ─── GH #551 rev.3: write bounds 0–99 (server 422 parity) ───
+  // 0 = «вместимость не задана» — legal, no operational effect. The old
+  // 1–500 range is retired; LocationUpdateSchema inherits via .strict().
+  it('accepts capacity 0 («вместимость не задана», GH #551 rev.3)', () => {
+    const result = LocationCreateSchema.parse({ title: 'Студия', capacity: 0 });
+    expect(result.capacity).toBe(0);
+  });
+
+  it('accepts capacity 99 (upper bound inclusive)', () => {
+    const result = LocationCreateSchema.parse({ title: 'Студия', capacity: 99 });
+    expect(result.capacity).toBe(99);
+  });
+
+  it('rejects capacity 100 (write bounds 0–99)', () => {
+    expect(() => LocationCreateSchema.parse({ title: 'Студия', capacity: 100 })).toThrow();
   });
 });
 

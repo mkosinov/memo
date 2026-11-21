@@ -381,7 +381,9 @@ export const ActivityCreateSchema = z.object({
   location_id: z.string(),
   start: z.string(), // floating local time (RFC 5545), NOT an instant — no zone suffix
   duration: z.number(),
-  capacity: z.number(),
+  // GH #551: write bounds 0–99 (0 = «запись закрыта»); server 422 parity.
+  // ActivityPatchSchema inherits via .partial(); response schemas stay unbounded (legacy rows).
+  capacity: z.number().min(0).max(99),
   is_private: z.boolean().optional(),
   comment: z.string().nullable().optional(),
   record_info: z.string().nullable().optional(),
@@ -746,7 +748,10 @@ export const LocationCreateSchema = z.object({
   short_title: z.string().optional().default(''),
   address: z.string().optional().default(''),
   description: z.string().optional().default(''),
-  capacity: z.number().min(1).max(500),
+  // GH #551 rev.3: write bounds 0–99 (server 422 parity; 0 = «вместимость не
+  // задана»). LocationUpdateSchema inherits via .strict(); response schema
+  // stays unbounded — legacy rows above 99 keep parsing.
+  capacity: z.number().min(0).max(99),
   yandex_map_url: z.string().optional().default(''),
   review_url: z.string().optional().default(''),
   record_info: z.string().optional().default(''),

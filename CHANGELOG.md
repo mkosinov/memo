@@ -60,6 +60,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-11-13
 
 ### Added
+- **GH #551 — Вместимость 0–99: занятие 0 = «запись закрыта», локация
+  0 = «не задана»** — branch `551-capacity-range` (8 задач, порядок
+  исполнения 1–6, 8, 7 — US-7 e2e ассертит тоз T8; 9 коммитов
+  `466b26d4..e2593af7`, base `6494b603`; 26 файлов; спека
+  `docs/specs/2026-11-13-capacity-range-551-design.md` рев.4, план
+  `docs/plans/2026-11-13-capacity-range-551-plan.md` 8/8 — оба на
+  main, unchanged by IMPL):
+  - **Сервер (T1 `466b26d4`, T2 `cb95c2ba`):** write-схемы
+    `ActivityCreate/Update/Patch` и `LocationCreate/Update` +
+    location-patch переопределяют `capacity` `Field(ge=0, le=99)`
+    (вне диапазона → 422); read-схемы без границ (легаси-чтение не
+    ограничено); контрактные матрицы POST/PUT/PATCH; явный пин гварда —
+    запись на занятие с capacity 0 → мгновенный 409
+    `ACTIVITY_AT_CAPACITY` (= «запись закрыта»).
+  - **Формы админки (T3 `6351544e`, T4 `39f4c081`, T5 `92af8cc1`):**
+    create — min 0 / max 99, гейт `canSave` (пустое блокирует «Создать»,
+    явный 0–99 проходит), автозаполнение из локации только при ≥ 1
+    (канон #595 «missing OR 0 counts as no default» в обоих режимах);
+    edit — instant-patch 0–99, пустое поле ≠ 0 (патч не уходит);
+    location-форма 0/99; Zod write-схемы api-client зеркалят сервер
+    (response-схемы — без границ).
+  - **Карточка и штамп (T6 `bdc5255f`, T8 `dc68271f`):** при capacity 0
+    карточка показывает «Запись закрыта · N» (N = occupied) вместо
+    N/M-доли, процент не считается; штамп WeekView/DayView на клетку
+    зала с capacity 0 легально копирует 0 и даёт громкий тост
+    «… запись закрыта (у зала «X» не задана вместимость)».
+  - **e2e (T7 `a2f17891`, `e2593af7`):** admin US-1–3/US-5–7
+    (`capacity-range.spec.ts` NEW) + web US-1 — попытка брони клиента
+    на закрытое занятие отклоняется (`booking-closed-activity.spec.ts`
+    NEW); попутно канон-фикс текста guard-сообщения (санкция
+    архитектора).
+  - Tests: task-level сьюты зелёные **111/0, 7/0, 136/0, 138/0,
+    919/0, 54/0, 47/0**; e2e полные прогоны — admin **537 passed /
+    0 failed / 6 skipped**, web **23/23**; quality-review re-verify
+    **21/21**; visual gate exit 0 (спека §7 — N/A).
+  - Status: домен-правила `activities.md`/`locations.md` — на main;
+    meta-docs — коммит `docs(#551)` этой ветки.
 - **GH #601 — Флаг «не показывать в web» для локаций** — branch
   `601-locations-web-visibility` (6 задач + 2 фикс-коммита
   `fecf11fd..78cbd9b2`, base `92896269` = origin/main; 54 файла,

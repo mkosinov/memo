@@ -873,30 +873,51 @@ describe('SettingsTab — service/location combobox flow', () => {
   });
 });
 
-// ─── SettingsTab — capacity gate (GH #280: вместимость ≥ 1) ─────────────────
+// ─── SettingsTab — capacity gate (GH #551: вместимость 0–99, rev.4) ─────────
 // Instant-patch convention (same as the «ЧЧ:ММ» duration): the field follows
-// raw input, but the capacity PATCH fires only for Number(value) >= 1 —
-// empty/zero input is silently not applied.
+// the raw input (`number | ''` — empty NEVER writes 0 into state), the PATCH
+// fires only for an explicit 0–99 value; empty and out-of-range input stay
+// silent. An explicit 0 = «запись закрыта» — legal instant patch.
 
-describe('SettingsTab — capacity gate (вместимость ≥ 1, GH #280)', () => {
-  it('does not patch capacity when the input is emptied or set to 0', () => {
+describe('SettingsTab — capacity gate (вместимость 0–99, GH #551)', () => {
+  it('patches an explicit 0 — «запись закрыта» is a legal value', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    fireEvent.change(screen.getByTestId('input-capacity'), { target: { value: '0' } });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).toHaveBeenCalledWith({ capacity: 0 });
+  });
+
+  it('clearing the field sends no patch and stays empty — 0 never lands in state', () => {
     const onUpdate = vi.fn();
     render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
     const input = screen.getByTestId('input-capacity');
     fireEvent.change(input, { target: { value: '' } });
-    fireEvent.change(input, { target: { value: '0' } });
     expect(onUpdate).not.toHaveBeenCalled();
+    // jest-dom renders an empty number-input as null
+    expect(input).toHaveValue(null);
   });
 
-  it('patches capacity for values >= 1', () => {
+  it('out-of-range 100 and −1 send no patch', () => {
     const onUpdate = vi.fn();
     render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
     const input = screen.getByTestId('input-capacity');
-    fireEvent.change(input, { target: { value: '1' } });
-    expect(onUpdate).toHaveBeenCalledWith({ capacity: 1 });
+    fireEvent.change(input, { target: { value: '100' } });
+    fireEvent.change(input, { target: { value: '-1' } });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it('patches in-range values (US-2: правка 0 → 12 fires both patches)', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-capacity');
+    fireEvent.change(input, { target: { value: '0' } });
     fireEvent.change(input, { target: { value: '12' } });
-    expect(onUpdate).toHaveBeenCalledWith({ capacity: 12 });
-    expect(onUpdate).toHaveBeenCalledTimes(2);
+    fireEvent.change(input, { target: { value: '99' } });
+    expect(onUpdate).toHaveBeenCalledTimes(3);
+    expect(onUpdate).toHaveBeenNthCalledWith(1, { capacity: 0 });
+    expect(onUpdate).toHaveBeenNthCalledWith(2, { capacity: 12 });
+    expect(onUpdate).toHaveBeenNthCalledWith(3, { capacity: 99 });
   });
 });
 
@@ -1712,7 +1733,7 @@ describe('create mode — footer «Создать» button (GH #598, re-domed fr
     expect(btn).toBeEnabled();
   });
 
-  it('gates «Создать»: empty datetime, bad duration, capacity < 1 each block the button', () => {
+  it('gates «Создать»: empty datetime, bad duration, capacity outside 0–99 each block the button', () => {
     renderCreateModal();
     const btn = screen.getByTestId('btn-create-activity');
     fillValidForm();
@@ -1732,12 +1753,15 @@ describe('create mode — footer «Создать» button (GH #598, re-domed fr
     fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '01:30' } });
     expect(btn).toBeEnabled();
 
-    // Вместимость: пусто / 0 / -1 → блок; 1 → ок (GH #280: путь «пусто → 0» исчез)
+    // Вместимость 0–99 явно (GH #551): пусто / −1 / 100 → блок; 0 =
+    // «запись закрыта» — легальное значение, активирует кнопку
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '' } });
     expect(btn).toBeDisabled();
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '0' } });
-    expect(btn).toBeDisabled();
+    expect(btn).toBeEnabled();
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '-1' } });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '100' } });
     expect(btn).toBeDisabled();
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '1' } });
     expect(btn).toBeEnabled();

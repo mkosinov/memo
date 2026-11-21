@@ -18,7 +18,7 @@ from src.domain.visit_status import (
     VisitStatus,
     compute_record_status,
 )
-from src.errors import ErrorCode, ErrorDetail
+from src.errors import ERROR_MESSAGES, ErrorCode, ErrorDetail
 from src.models.activity import Activity
 from src.models.record import Record
 from src.models.visit import Visit
@@ -118,10 +118,14 @@ async def check_activity_capacity(
     occupied = occupied_result.scalar() or 0
 
     if occupied + seats > activity.capacity:
+        # GH #551 follow-up: the registry canon, not a raw f-string — the
+        # web shows the structured server message verbatim, so the guard's
+        # text is user-facing (ERROR_MESSAGES[ACTIVITY_AT_CAPACITY] =
+        # «Недостаточно мест»); the 409 status and the code stay as-is.
         raise HTTPException(
             status_code=409,
             detail=ErrorDetail(
                 code=ErrorCode.ACTIVITY_AT_CAPACITY,
-                message=f"Activity at capacity: {occupied}/{activity.capacity} seats occupied",
+                message=ERROR_MESSAGES[ErrorCode.ACTIVITY_AT_CAPACITY],
             ).model_dump(),
         )

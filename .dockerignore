@@ -1,0 +1,38 @@
+# Context-scoped ignore for repo-root-context image builds
+# (docker build -f deploy/Dockerfile.admin .). The context must be the repo
+# root (pnpm workspace: root lockfile + the @memo/* packages admin imports),
+# so this keeps the upload to manifests + sources: everything else is either
+# rebuilt inside the image (node_modules, .next, dist) or irrelevant to it
+# (backend, docs, e2e artifacts). Env files are excluded on purpose — Next
+# loads .env* at build time and a stray local one would silently alter the
+# bake; the only env that enters the build is the NEXT_PUBLIC_* build args.
+.git
+.worktrees
+node_modules
+**/node_modules
+.next
+**/.next
+**/dist
+**/.turbo
+**/.vercel
+package-lock.json
+**/package-lock.json
+.env*
+**/.env*
+test-results
+**/test-results
+playwright-report
+**/playwright-report
+**/coverage
+**/*.tsbuildinfo
+backend
+docs
+sketches
+frontend/admin/e2e
+frontend/admin/__tests__
+frontend/admin/playwright.config.ts
+frontend/admin/vitest.config.ts
+# web sources are not baked into the admin image, but its package.json must
+# reach the builder: pnpm resolves the whole workspace graph (frontend/*).
+frontend/web/*
+!frontend/web/package.json

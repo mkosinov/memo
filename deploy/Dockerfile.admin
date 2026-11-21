@@ -1,0 +1,90 @@
+# Admin production image (GH #616, spec §3.1).
+#
+# Build (from repo root; the context MUST be the repo root — this is a pnpm
+# workspace: admin imports @memo/api-client and @memo/domain from packages/,
+# and the frozen install needs the root pnpm-lock.yaml; a frontend/admin-only
+# context cannot see either):
+#   docker build -f deploy/Dockerfile.admin -t memo-admin:test .
+#
+# Build args carry ONLY public values (spec §3.3: no secrets in image layers
+# or build logs). Defaults are the prod bake; override per environment:
+#   --build-arg NEXT_PUBLIC_API_URL=/api       (relative, same-origin API)
+#   --build-arg NEXT_PUBLIC_BASE_PATH=/admin   (basePath; dev stays unset)
+#
+# Runtime contract (spec §3.1–3.2):
+#   - Next 14 standalone server (output: 'standalone' in next.config.mjs) —
+#     runtime image without full node_modules (replacement for `next start`);
+#   - known Next 14 gap: standalone does NOT include public/ and .next/static
+#     — both are copied explicitly below (spec mandates this);
+#   - pnpm workspace quirk: the standalone tree is WORKSPACE-rooted, the
+#     server entry is frontend/admin/server.js, not a root server.js;
+#   - HOSTNAME=0.0.0.0 — standalone server.js binds process.env.HOSTNAME;
+#     without it the container only listens on loopback inside its netns;
+#   - port 3000, published to host loopback only by compose (spec §3.2) —
+#     public exposure/SSL belongs to the host nginx (#617).
+
+# ---- Build stage: full workspace toolchain, discarded afterwards ----------
+FROM node:26-alpine AS build
+
+# pnpm pinned to root package.json `packageManager` (Node 26 images ship
+# without corepack).
+RUN npm install -g pnpm@11.5.1
+
+# Public build args → ENV BEFORE `next build`: Next inlines NEXT_PUBLIC_* at
+# build time; the relative /api base also flips images to unoptimized
+# (next.config.mjs).
+ARG NEXT_PUBLIC_API_URL=/api
+ARG NEXT_PUBLIC_BASE_PATH=/admin
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH} \
+    NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /repo
+
+# Deps layer (cached unless manifests/lockfile change). All four workspace
+# manifests must exist for pnpm to resolve the workspace graph; scripts/
+# because the root postinstall (install-hooks.sh) runs on install and is
+# git-safe (skips cleanly without a .git).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY scripts ./scripts
+COPY frontend/admin/package.json frontend/admin/
+COPY frontend/web/package.json frontend/web/
+COPY packages/api-client/package.json packages/api-client/
+COPY packages/domain/package.json packages/domain/
+
+# admin + its workspace deps only (--filter keeps frontend/web and its
+# toolchain out of the layer).
+RUN pnpm install --frozen-lockfile --filter @memo/admin...
+
+# Sources: admin + the two workspace packages it imports.
+COPY packages/api-client packages/api-client
+COPY packages/domain packages/domain
+COPY frontend/admin frontend/admin
+
+# Topo-ordered by pnpm: tsup builds @memo/api-client and @memo/domain first,
+# then `next build` emits the workspace-rooted standalone tree
+# (.next/standalone/frontend/admin/server.js).
+RUN pnpm --filter @memo/admin... run build
+
+# ---- Runtime stage: standalone server only --------------------------------
+FROM node:26-alpine AS runtime
+
+# server.js reads PORT/HOSTNAME; NODE_ENV is belt-and-braces (server.js sets
+# it too).
+ENV NODE_ENV=production \
+    HOSTNAME=0.0.0.0 \
+    PORT=3000
+
+WORKDIR /app
+
+# Workspace-rooted standalone tree (entry: frontend/admin/server.js).
+COPY --from=build --chown=node:node /repo/frontend/admin/.next/standalone ./
+# Standalone excludes both (spec §3.1): public/ next to the app dir, static
+# chunks under its .next/.
+COPY --from=build --chown=node:node /repo/frontend/admin/public ./frontend/admin/public
+COPY --from=build --chown=node:node /repo/frontend/admin/.next/static ./frontend/admin/.next/static
+
+USER node
+EXPOSE 3000
+
+CMD ["node", "frontend/admin/server.js"]

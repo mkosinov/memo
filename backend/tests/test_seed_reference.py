@@ -50,11 +50,36 @@ exit-2 usage errors: ``test_check_and_dry_run_together_exit_2``,
 №9 dry-run — ``test_dry_run_on_in_memory_db_prints_summary_and_changes_nothing``
 (in-memory shared-cache DB, summary printed, DB content unchanged) +
 ``test_dry_run_rolls_back_all_csv_writes`` (file DB, rollback).
+
+№10 existing apply layer on CSV fixtures (issue #612 Task 4; the behavior
+suite the plan migrates from the YAML era): natural-key duplicates —
+``test_duplicate_natural_keys_fail_load`` (all eight sections/children);
+``max_age < min_age`` — ``test_max_age_below_min_age_fails_with_service_line``;
+color ``#RRGGBB`` — ``test_master_color_must_be_hex_rgb_with_staff_line``;
+exact link sync — ``test_re_run_syncs_link_sets_exactly_and_warns_for_extra_tariffs``
+(position/material links exact, tariffs deliberately non-destructive + warning);
+one transaction + rollback — ``test_apply_error_rolls_back_whole_load``;
+idempotent re-run — ``test_re_run_is_idempotent``; builtin positions by fixed
+ids — ``test_missing_builtin_positions_fail_with_alembic_hint`` +
+``test_builtin_positions_keep_fixed_ids``.
+
+№11 tags §4.7 — ``test_empty_tag_columns_clear_links_and_keep_tag_entities``
+(empty tag columns + no tags section → listed entities' links cleared, tag
+entities kept; filled columns → links created).
+
+№12 services ``is_public`` (NOT a services CSV column, spec §4.2): the model
+default True is what the file applies — create
+``test_apply_writes_service_is_public_default_true`` and re-run
+``test_re_run_applies_service_is_public_default_true`` (load level:
+``test_services_is_public_column_is_extra_and_ignored``). The shipped-YAML
+controls of #601/#606 are gone — the template fixture test above owns the
+«shipped template converges» contract (formalized as §6 №8 in Task 5).
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 from typing import TYPE_CHECKING
 
@@ -64,8 +89,11 @@ from sqlalchemy.orm import Session
 
 from src.db.base import Base
 from src.db.database import DBManager
-from src.models import Location, Position, Service, Staff
+from src.models import Location, Material, Position, Service, Staff, Tag, Tariff
 from src.models.enums import TariffAudience
+from src.models.position import staff_positions
+from src.models.service_material import ServiceMaterial
+from src.models.tag import location_tags, master_tags, service_tags
 from src.seed.reference import (
     CSV_SECTIONS,
     DEFAULT_CSV,
@@ -1096,3 +1124,320 @@ def test_dry_run_on_in_memory_db_prints_summary_and_changes_nothing(
             engine.dispose()
     finally:
         keeper.close()
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 №10 (issue #612 Task 4): the existing apply layer — unchanged
+# behavior, CSV-era message texts. Natural keys, row validation, exact link
+# sync, one transaction, idempotency, builtin positions.
+# ---------------------------------------------------------------------------
+
+# Each case inserts a natural-key duplicate right after the original row:
+# (anchor row text, duplicate row text, expected duplicate line, «what» the
+# error names, the duplicated value).
+_DUPLICATE_CASES: list[tuple[str, str, int, str, str]] = [
+    (
+        ";Примерная мастерская;Пример;Учебный адрес, 1;;12;;;;;;0;пример;True",
+        ";Примерная мастерская;Дубль;Учебный адрес, 2;;5;;;;;;1;;False",
+        4,
+        "секция locations",
+        "Примерная мастерская",
+    ),
+    (
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";Линогравюра для примера;Дубль;;Графика;8;;90;;",
+        8,
+        "секция services",
+        "Линогравюра для примера",
+    ),
+    (
+        ";Учебный материал;Материал только для примера",
+        ";Учебный материал;Дубль",
+        12,
+        "секция materials",
+        "Учебный материал",
+    ),
+    (
+        "\n;Мастер",
+        ";Мастер",
+        28,
+        "секция positions",
+        "Мастер",
+    ),
+    (
+        "\n;пример",
+        ";пример",
+        33,
+        "секция tags",
+        "пример",
+    ),
+    (
+        ';Алексей;Примеров;0;;"Мастер;Администратор";"Графика;Моделирование";#456789;True;пример',
+        ";Алексей;Примеров;1;;;;;;",
+        24,
+        "секция staff",
+        "Алексей Примеров",
+    ),
+    (
+        ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all",
+        ";Линогравюра для примера;Обычный;Дубль тарифа;2000;kid",
+        20,
+        "services «Линогравюра для примера» (tariffs)",
+        "Обычный",
+    ),
+    (
+        ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
+        ";Линогравюра для примера;Учебный материал;",
+        16,
+        "services «Линогравюра для примера» (materials)",
+        "Учебный материал",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("anchor", "duplicate", "line", "what", "value"),
+    _DUPLICATE_CASES,
+    ids=["locations", "services", "materials", "positions", "tags", "staff", "tariffs", "materials-link"],
+)
+def test_duplicate_natural_keys_fail_load(
+    csv_path: Path, anchor: str, duplicate: str, line: int, what: str, value: str
+) -> None:
+    """Spec §6 №10 / §4.6: every natural key (title / first+last name, and
+    the child sets under a service) must be unique in the file — a duplicate
+    is a load error citing the duplicate row's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    assert anchor in text
+    csv_path.write_text(text.replace(anchor, f"{anchor}\n{duplicate}"), encoding="utf-8")
+
+    with pytest.raises(
+        SeedDataError,
+        match=rf"строка {line}: {re.escape(what)}: значение «{value}» встречается дважды",
+    ):
+        load_reference_data(csv_path)
+
+
+def test_max_age_below_min_age_fails_with_service_line(csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: ``max_age < min_age`` is a row-validation error —
+    the CSV-era text carries the record line instead of a file name."""
+    _mutated(csv_path, ";Графика;8;;90;", ";Графика;8;3;90;")
+
+    with pytest.raises(
+        SeedDataError, match=r"строка 7 \(services\).*max_age не может быть меньше min_age"
+    ):
+        load_reference_data(csv_path)
+
+
+def test_master_color_must_be_hex_rgb_with_staff_line(csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: the master color must match ``#RRGGBB`` — a bad
+    cell is a row-validation error with the record line."""
+    _mutated(csv_path, ";#456789;True;пример", ";456789;True;пример")
+
+    with pytest.raises(
+        SeedDataError,
+        match=r"строка 23 \(staff\): color: String should match pattern '\^#\[0-9A-Fa-f\]\{6\}\$'",
+    ):
+        load_reference_data(csv_path)
+
+
+async def test_apply_error_rolls_back_whole_load(db_manager: DBManager, csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: all-or-nothing — an apply-stage failure (an
+    archived location under the same natural key) rolls back EVERYTHING the
+    load wrote in that transaction, not just the failing row."""
+    async with db_manager.async_session() as session:
+        session.add(Location(title="Примерная мастерская", capacity=5, is_active=False))
+        await session.commit()
+
+    data = load_reference_data(csv_path)
+    summary = Summary()
+    async with db_manager.async_session() as session:
+        with pytest.raises(SeedDataError, match="находится в архиве"):
+            await apply_reference_data(session, data, summary)
+        await session.rollback()
+
+    async with db_manager.async_session() as session:
+        assert list((await session.scalars(select(Tag))).all()) == []
+        assert list((await session.scalars(select(Material))).all()) == []
+        assert list((await session.scalars(select(Service))).all()) == []
+        assert list((await session.scalars(select(Staff))).all()) == []
+
+
+async def test_re_run_is_idempotent(db_manager: DBManager, csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: a re-run of the same file updates nothing and
+    creates nothing — every bucket reports the row as unchanged."""
+    await _apply(db_manager, csv_path)
+    summary = await _apply(db_manager, csv_path)
+
+    assert summary.stats and all(stats.created == 0 for stats in summary.stats.values())
+    expected_unchanged = {
+        "Теги": 1,
+        "Материалы": 1,
+        "Должности": 2,
+        "Направления": 2,
+        "Локации": 1,
+        "Услуги": 1,
+        "Тарифы": 1,
+        "Сотрудники": 1,
+        "Мастера": 1,
+    }
+    for name, unchanged in expected_unchanged.items():
+        assert summary.bucket(name).unchanged == unchanged, name
+        assert summary.bucket(name).updated == 0, name
+
+
+async def test_missing_builtin_positions_fail_with_alembic_hint(csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: the ``master``/``admin`` position rows are
+    migration-seeded under FIXED ids — a DB without them fails the load with
+    the alembic hint instead of re-creating them under UUID ids."""
+    manager = DBManager("sqlite+aiosqlite:///:memory:")
+    async with manager.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        data = load_reference_data(csv_path)
+        summary = Summary()
+        async with manager.async_session() as session:
+            with pytest.raises(SeedDataError, match="В базе нет системных должностей"):
+                await apply_reference_data(session, data, summary)
+    finally:
+        await manager.engine.dispose()
+
+
+async def test_builtin_positions_keep_fixed_ids(db_manager: DBManager, csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: the positions section listing the builtin titles
+    matches the migration-seeded rows — no new rows, the string ids stay
+    ``master``/``admin`` (the role template anchors on them)."""
+    summary = await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        rows = {row.id: row.title for row in (await session.scalars(select(Position))).all()}
+    assert rows == {"master": "Мастер", "admin": "Администратор"}
+    assert summary.bucket("Должности").created == 0
+    assert summary.bucket("Должности").unchanged == 2
+
+
+async def test_re_run_syncs_link_sets_exactly_and_warns_for_extra_tariffs(
+    db_manager: DBManager, csv_path: Path
+) -> None:
+    """Spec §6 №10 / §4.6: tag/material/position links are synced as an
+    EXACT set (rows absent from the re-run file are removed), while tariffs
+    are deliberately non-destructive — extra ones stay with a warning."""
+    await _apply(db_manager, csv_path)
+
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace('"Мастер;Администратор"', "Мастер")
+    text = text.replace("\n;Линогравюра для примера;Учебный материал;Для демонстрации связи", "")
+    text = text.replace("\n;Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all", "")
+    csv_path.write_text(text, encoding="utf-8")
+
+    summary = await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        assert list((await session.scalars(select(ServiceMaterial))).all()) == []
+        staff = (await session.scalars(select(Staff))).one()
+        linked_ids = set(
+            (
+                await session.scalars(
+                    select(staff_positions.c.position_id).where(
+                        staff_positions.c.staff_id == staff.id
+                    )
+                )
+            ).all()
+        )
+        titles = {row.id: row.title for row in (await session.scalars(select(Position))).all()}
+        assert {titles[position_id] for position_id in linked_ids} == {"Мастер"}
+        tariff_titles = [row.title for row in (await session.scalars(select(Tariff))).all()]
+    assert tariff_titles == ["Обычный"]
+    assert any("есть тарифы вне файла" in warning for warning in summary.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 №11 (issue #612 Task 4): tag semantics §4.7 — empty tag columns
+# mean «the listed entities' links are cleared», tag entities are only ever
+# added, never deleted.
+# ---------------------------------------------------------------------------
+
+
+async def test_empty_tag_columns_clear_links_and_keep_tag_entities(
+    db_manager: DBManager, csv_path: Path
+) -> None:
+    """Spec §4.7: the owner's real CSV shape — no ``tags`` section, every tag
+    column empty. Run 1 (filled columns) creates the links; run 2 (empty
+    columns, no section) clears them for every listed entity while the Tag
+    row itself survives (tags are add-only at the entity level)."""
+    await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        # «заполненные → связи созданы»
+        assert len(list((await session.scalars(select(location_tags.c.tag_id))).all())) == 1
+        assert len(list((await session.scalars(select(service_tags.c.tag_id))).all())) == 1
+        assert len(list((await session.scalars(select(master_tags.c.tag_id))).all())) == 1
+
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";0;пример;True", ";0;;True")
+    text = text.replace(";90;;пример", ";90;;")
+    text = text.replace(";#456789;True;пример", ";#456789;True;")
+    text = text.replace("\ntags\n;title\n;пример\n\nspecialty", "\nspecialty")
+    csv_path.write_text(text, encoding="utf-8")
+
+    await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        # «сущности-теги не удалены»
+        tags = [row.title for row in (await session.scalars(select(Tag))).all()]
+        assert tags == ["пример"]
+        # «связи перечисленных сущностей очищены» — all three link kinds
+        assert list((await session.scalars(select(location_tags.c.tag_id))).all()) == []
+        assert list((await session.scalars(select(service_tags.c.tag_id))).all()) == []
+        assert list((await session.scalars(select(master_tags.c.tag_id))).all()) == []
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 №12 completion (issue #612 Task 4): services carry no ``is_public``
+# CSV column (spec §4.2 — GH #606 left services visibility admin-side for
+# the loader), so the model default True is the value the file applies.
+# ---------------------------------------------------------------------------
+
+
+async def test_apply_writes_service_is_public_default_true(
+    db_manager: DBManager, csv_path: Path
+) -> None:
+    """A created service row carries the model default True — there is no
+    CSV column to say otherwise."""
+    await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        service = (
+            await session.scalars(
+                select(Service).where(Service.title == "Линогравюра для примера")
+            )
+        ).one()
+        assert service.is_public is True
+
+
+async def test_re_run_applies_service_is_public_default_true(
+    db_manager: DBManager, csv_path: Path
+) -> None:
+    """The default is APPLIED, not skipped: a service the admin hid
+    (``is_public=False``) flips back to True on a re-run — the whitelist
+    carries the model default, exactly like the locations column carries
+    the file's polarity."""
+    await _apply(db_manager, csv_path)
+    async with db_manager.async_session() as session:
+        service = (
+            await session.scalars(
+                select(Service).where(Service.title == "Линогравюра для примера")
+            )
+        ).one()
+        service.is_public = False
+        await session.commit()
+
+    summary = await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        service = (
+            await session.scalars(
+                select(Service).where(Service.title == "Линогравюра для примера")
+            )
+        ).one()
+        assert service.is_public is True
+    assert summary.bucket("Услуги").updated == 1

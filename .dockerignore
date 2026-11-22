@@ -1,5 +1,5 @@
 # Context-scoped ignore for repo-root-context image builds
-# (docker build -f deploy/Dockerfile.{admin,web} .). The context must be the
+# (docker build -f deploy/Dockerfile.{admin,edge} .). The context must be the
 # repo root (pnpm workspace: root lockfile + the @memo/* packages the apps
 # import), so this keeps the upload to manifests + sources: everything else
 # is either rebuilt inside the image (node_modules, .next, dist) or
@@ -33,10 +33,10 @@ frontend/admin/e2e
 frontend/admin/__tests__
 frontend/admin/playwright.config.ts
 frontend/admin/vitest.config.ts
-# web sources ARE baked into the web image (Dockerfile.web), so unlike the
-# admin-era ignore they stay in the context — only its test/e2e artifacts and
-# SCRATCHPAD are pruned. All package.json manifests must stay visible: pnpm
-# resolves the whole workspace graph (frontend/*).
+# web sources ARE baked into the edge image (Dockerfile.edge), so unlike the
+# admin-era ignore they stay in the context — only their test/e2e artifacts
+# and SCRATCHPAD are pruned. All package.json manifests must stay visible:
+# pnpm resolves the whole workspace graph (frontend/*).
 frontend/web/SCRATCHPAD.md
 frontend/web/e2e
 frontend/web/test

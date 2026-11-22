@@ -189,8 +189,13 @@ jobs:
       SMSRU_CALLCHECK_API_KEY: ${{ secrets.SMSRU_CALLCHECK_API_KEY }}
       NOTIFICATION_ENABLED: ${{ secrets.NOTIFICATION_ENABLED }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      # Telegram relay account (backend/src/core/config.py contract);
+      # TELEGRAM_SEND_PAUSE / TELEGRAM_DAILY_CAP are tuning knobs with
+      # app defaults, not deploy secrets — deliberately absent.
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+      TELEGRAM_ADMIN_PHONE: ${{ secrets.TELEGRAM_ADMIN_PHONE }}
 
     steps:
       # Spec §4.2: scp the deploy files FROM THE RELEASE CHECKOUT — deploy.sh
@@ -254,8 +259,10 @@ jobs:
             emit SMSRU_CALLCHECK_API_KEY "${SMSRU_CALLCHECK_API_KEY}"
             emit NOTIFICATION_ENABLED "${NOTIFICATION_ENABLED}"
             emit REDIS_URL "${REDIS_URL}"
-            emit TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN}"
-            emit TELEGRAM_CHAT_ID "${TELEGRAM_CHAT_ID}"
+            emit TELEGRAM_API_ID "${TELEGRAM_API_ID}"
+            emit TELEGRAM_API_HASH "${TELEGRAM_API_HASH}"
+            emit TELEGRAM_SESSION "${TELEGRAM_SESSION}"
+            emit TELEGRAM_ADMIN_PHONE "${TELEGRAM_ADMIN_PHONE}"
           )"
           printf '%s' "$ENV_PAYLOAD" | ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
             "$SSH_USER@$SSH_HOST" \

@@ -540,8 +540,8 @@ def _read_entity_sections(
                 row,
             )
         )
-    for item, row in zip(locations, parsed.sections["locations"], strict=True):
-        line_by_entity[("locations", item.title)] = row.line
+    for location, row in zip(locations, parsed.sections["locations"], strict=True):
+        line_by_entity[("locations", location.title)] = row.line
 
     services: list[ServiceIn] = []
     for row in parsed.sections["services"]:
@@ -562,8 +562,8 @@ def _read_entity_sections(
                 row,
             )
         )
-    for item, row in zip(services, parsed.sections["services"], strict=True):
-        line_by_entity[("services", item.title)] = row.line
+    for service, row in zip(services, parsed.sections["services"], strict=True):
+        line_by_entity[("services", service.title)] = row.line
 
     materials = [
         _validate_row(
@@ -573,15 +573,15 @@ def _read_entity_sections(
         )
         for row in parsed.sections["materials"]
     ]
-    for item, row in zip(materials, parsed.sections["materials"], strict=True):
-        line_by_entity[("materials", item.title)] = row.line
+    for material, row in zip(materials, parsed.sections["materials"], strict=True):
+        line_by_entity[("materials", material.title)] = row.line
 
     positions = [
         _validate_row(PositionIn, {"title": row.cells["title"]}, row)
         for row in parsed.sections["positions"]
     ]
-    for item, row in zip(positions, parsed.sections["positions"], strict=True):
-        line_by_entity[("positions", item.title)] = row.line
+    for position, row in zip(positions, parsed.sections["positions"], strict=True):
+        line_by_entity[("positions", position.title)] = row.line
 
     tags = [_required(row, "title") for row in parsed.sections.get("tags", [])]
     for title, row in zip(tags, parsed.sections.get("tags", []), strict=True):
@@ -680,12 +680,12 @@ def _attach_service_children(
             raise SeedDataError(
                 f"строка {row.line}: материал «{material_title}» не найден в секции materials"
             )
-        item = _validate_row(
+        link = _validate_row(
             MaterialLinkIn,
             {"title": material_title, "note": row.cells["note"]},
             row,
         )
-        links.setdefault(service_title, []).append(item)
+        links.setdefault(service_title, []).append(link)
         line_by_entity[("service_materials", f"{service_title}\0{material_title}")] = row.line
 
     for row in parsed.sections["tariffs"]:
@@ -695,7 +695,7 @@ def _attach_service_children(
                 f"строка {row.line}: услуга «{service_title}» из tariffs "
                 "не найдена в секции services"
             )
-        item = _validate_row(
+        tariff = _validate_row(
             TariffIn,
             {
                 "title": row.cells["title"],
@@ -705,8 +705,8 @@ def _attach_service_children(
             },
             row,
         )
-        tariffs.setdefault(service_title, []).append(item)
-        line_by_entity[("tariffs", f"{service_title}\0{item.title}")] = row.line
+        tariffs.setdefault(service_title, []).append(tariff)
+        line_by_entity[("tariffs", f"{service_title}\0{tariff.title}")] = row.line
 
     data.services = [
         service.model_copy(

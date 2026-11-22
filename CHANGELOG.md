@@ -11,65 +11,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **GH #616 — Прод-деплой из main: релизы milestone → 3 образа (GHCR) →
-  VPS с откатом** — branch `616-prod-deploy` (6 задач, 16 коммитов
-  `436f5b0c..7430e1c1`, base `81d57172` = main; 29 файлов,
-  +2579/−22; спека
-  `docs/specs/2026-11-21-prod-deploy-616-design.md` рев.2, план
-  `docs/plans/2026-11-22-prod-deploy-616-plan.md` 6/6 — оба на main,
-  unchanged by IMPL; инфраструктурная фича — пользовательского
-  поведения нет):
-  - **Прод-режим backend (T1 `436f5b0c`):** `ENV` —
-    `Literal["development","testing","production"]` с отказом старта
-    на неизвестном значении; sqladmin монтируется только по явному
-    `SQLADMIN_ENABLED` (дефолт OFF); прагмы `journal_mode=WAL` +
-    `busy_timeout` закреплены регресс-пинами.
-  - **Frontend сборочные аргументы (T2 `78a191c6`):** admin
-    `output: 'standalone'` + `basePath` от `NEXT_PUBLIC_BASE_PATH`,
-    относительный `NEXT_PUBLIC_API_URL=/api` в разделяемом api-client
-    (`resolveApiUrl` — same-origin в образах, дев-фолбэк нетронут);
-    поправка архитектора — `images.unoptimized` условно на
-    относительном API-base; недвоение avatar-URL.
-  - **Каталог `deploy/` (T3 `fc5171dd`, `0586195d`, `0673a962`,
-    `de29e81f`, `5063283c`, `a75eba09` + качество `527785a4`):**
-    `Dockerfile.backend` (uv, single-process uvicorn, строгий
-    `FORWARDED_ALLOW_IPS`, non-root uid 1001), `Dockerfile.admin`
-    (multi-stage standalone), `Dockerfile.web` + `nginx-web.conf`
-    (nginx:1.29-alpine pinned, SPA-fallback, `server_tokens off`,
-    nosniff, gzip), `docker-compose.prod.yml` (loopback-порты
-    8000/3000/8080, env_file `/opt/memo/env/production.env`, тома,
-    WAL-grace, python-healthcheck).
-  - **CI-конвейер и rollout (T4 `ca648d5c`, `eed9c651`, `4cddcf97`,
-    `2e700947`):** `deploy.yml` — триггеры `release: published` +
-    `workflow_dispatch` с тегом, buildx → GHCR, job `prod-deploy`
-    no-cancel concurrency, environment production; `deploy.sh` —
-    login-if-token → pull → migrate → up → health, канон кодов выхода
-    0–5, шим `docker compose`/`docker-compose`; job `prod-build` в
-    `test.yml` на PR (сборка 3 образов без пуша + compose-прогон с
-    миграцией и проверками health/admin/web); фикс — `alembic/env.py`
-    потребляет `DATABASE_URL` (миграции бьют в смонтированную прод-БД).
-  - **Релизный скрипт (T5 `7430e1c1`):** `scripts/release.sh` —
-    проверка закрытости milestone → закрытие → notes из issues →
-    `gh release create --target main`; `--dry-run`.
-  - **Локальный прод-смоук (T6 `99706e0c`+`5e312cc7`):**
-    `scripts/prod-smoke.sh` — temp-каталог + override-тома/env,
-    migrate → up → health, 401 анониму, `/admin`-шелл, WAL-ассерт;
-    режимы default/`--rollback`/`--no-secrets`, порты
-    `SMOKE_{BACKEND,ADMIN,WEB}_PORT`; teardown без остатков;
-    прод-валидаторы `SECRET_KEY`/`OTP_PEPPER` закреплены 4 тестами.
-  - Tests: backend unit прод-режима **14/14**, полный сьют
-    **4477 passed / 92 skipped / 0 failed**; api-client **649/649**,
-    скоуп admin **125/125**, сборки rc=0; actionlint + shellcheck
-    чисто, deploy.sh dryrun **48/48**; release.sh dry-run на живом
-    milestone зелёный (23 issues); prod-smoke **3 прогона exit 0**;
-    приёмка спеки §7 — сценарии 2/3/4 смоуком, сценарий 5
-    (видимость prod-build на PR) закрывается прогоном PR, сценарий 1 —
-    локальная часть; visual gate §9 N/A → exit 0; полный CI — гейт PR
-    (manager-owned).
-  - Известные остатки (issues НЕ заводятся): операторские пред-шаги
-    первого деплоя на VPS (env-файл, `/opt/memo` chown 1001:1001,
-    откатная тренировка §6 — ждут #574/#617); секреты/переменные
-    репозитория `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/`DEPLOY_SSH_KEY`,
-    опционально `REGISTRY_TOKEN` и `vars.REGISTRY_PREFIX`.
+  VPS с откатом** — branch `616-prod-deploy`, открытый PR #629: раунд 1
+  (16 коммитов `436f5b0c..7430e1c1`, base `81d57172` = main; 29 файлов,
+  +2579/−22; спека рев.2) покраснил CI-чек «Prod build smoke»
+  (union-merge env_file в compose); владелец принял три решения —
+  спека переписана до рев.6, план переписан (оба на main); PR
+  переработан rework-раундом — 14 коммитов `6c60c467..73a61ecf`
+  поверх merge origin/main + docser-коммит мета-док (файлы rework:
+  `deploy/*`, `.github/workflows/{deploy,test}.yml`,
+  `scripts/prod-smoke.sh`, `.dockerignore`; инфраструктурная фича —
+  пользовательского поведения нет):
+  - **База волны (раунд 1, rework-ом не тронута):** прод-режим backend
+    — `ENV` `Literal["development","testing","production"]` с отказом
+    старта на неизвестном значении, sqladmin только по явному
+    `SQLADMIN_ENABLED` (дефолт OFF), WAL-прагмы пинами (T1
+    `436f5b0c`); admin `output: 'standalone'` + `basePath` от
+    `NEXT_PUBLIC_BASE_PATH`, относительный `NEXT_PUBLIC_API_URL=/api`
+    (`resolveApiUrl`; `images.unoptimized` условно на относительном
+    API-base) (T2 `78a191c6`); `deploy.sh` — login → pull → migrate →
+    up → health, канон кодов выхода 0–5; `scripts/release.sh` —
+    milestone closed-check → close → notes → `gh release create
+    --target main`, `--dry-run` (T5 `7430e1c1`); фикс `alembic/env.py`
+    потребляет `DATABASE_URL` (миграции бьют в смонтированную
+    прод-БД). Tests базы: backend unit прод-режима **14/14**, полный
+    сьют **4477 passed / 92 skipped / 0 failed**; api-client
+    **649/649**, скоуп admin **125/125**; release.sh dry-run на живом
+    milestone зелёный (23 issues).
+  - **`deploy/render-env.sh` (решение 1 — красный-чек-фикс):** env
+    рендерится из GitHub Secrets/job-переменных в канонический
+    `/opt/memo/env/production.env` — вход по stdin, атомарная запись,
+    права 0600, значения не печатаются; CRLF-толерантность, отказ на
+    пустом рендере. Им пользуются `deploy.yml`, CI-смоук и
+    `prod-smoke.sh`; `test.yml` рендерит литералы-пустышки в
+    канонический путь (sudo + 0644 — runner не root), env_file-
+    оверрайд compose больше не трогается вовсе.
+  - **Edge-топология (решение 2):** `Dockerfile.edge` + `nginx.conf`
+    упраздняют web-образ — единственный nginx полного сайта: :80 —
+    редирект на HTTPS + ACME-challenge + exact-match health-маршрут,
+    :443 — TLS с хостовыми сертификатами; `/` → статика SPA,
+    `/images/public/` → публичное поддерево медиа-тома, `/admin` →
+    admin, `/api` → backend — без переписывания путей; HSTS;
+    drift-гард конфигов в `verify-edge.sh`; для смоука —
+    `deploy/nginx.smoke.conf` (TLS-off). compose публикует только edge
+    (80/443); закреплённая подсеть + статический IP edge `172.16.0.10`
+    = `FORWARDED_ALLOW_IPS` (синхронно в ARG `Dockerfile.backend`);
+    loopback-порты сняты; health деплоя — через edge с хоста.
+  - **Единый медиа-том (решение 3):** `/opt/memo/media` — edge
+    монтирует только `public/` read-only и отдаёт по `/images/`;
+    backend монтирует корень read-write (`FILES_DIR`, загрузки в
+    `avatars/`); граница публичности — уровнем монтирования, прежняя
+    схема раздельных томов упразднена.
+  - **Качество по ревью:** charset-валидация тега/префикса реестра,
+    `REGISTRY_TOKEN` по stdin (не в argv), preflight
+    certs/acme/media-public, бэкап env рядом с целью + abort на
+    stale-бэкапе, TELEGRAM-секреты по контракту Settings.
+  - Tests (rework): render-env **48/48**, deploy.sh dryrun **52/52**,
+    verify-edge **6/6**; actionlint + shellcheck чисто; prod-smoke —
+    сценарии 2/3/4 **exit 0** (inode/WAL/401, алиас `/images/`
+    positive+negative); ревью compliance + quality зелёные
+    (digest-пиннинг базовых образов — отложено).
+  - Нерешённое: прогон PR CI («Prod build smoke» + полный CI на
+    PR #629) — гейт manager; операторские шаги #574/#617/#619
+    актуальны, ранбук #619 проще — env рендерится деплоем сам;
+    секреты/переменные репозитория `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/
+    `DEPLOY_SSH_KEY`, опционально `REGISTRY_TOKEN` и
+    `vars.REGISTRY_PREFIX`.
   - Status: `docs/status/2026-11-22-prod-deploy-616.md`
 - **GH #612 — Предзагрузка прода: загрузчик читает CSV владельца
   напрямую (`--csv`), YAML-вход упразднён, CSV-шаблон-инструкция

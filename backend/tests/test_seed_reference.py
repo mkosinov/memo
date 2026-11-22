@@ -5,23 +5,101 @@ flag ``is_public`` — both polarities, on create AND on the natural-key re-run
 (in-place update). A field that is parsed but silently dropped from the
 apply whitelist must turn these tests red.
 
-GH #606 (spec §3.6, scenario 10): the same contract for services —
-``ServiceIn.is_public`` + the apply whitelist + both polarities in the
-shipped ``seed-data/services.yaml`` fixtures.
+Spec §6 test map — items №1–№3 (issue #612 Task 1 DoD):
+
+№1 sections & assembly — ``test_shipped_csv_template_checks_and_has_linked_specialties``
+(all sections load), ``test_each_required_section_is_mandatory``,
+``test_tags_section_present_collects_tags`` / ``..._optional_and_absence_...``,
+``test_service_children_nest_by_service_title``,
+``test_staff_row_without_master_columns_has_no_master_block``,
+``test_partial_master_fill_reports_staff_line``,
+``test_master_block_requires_specialty_and_color`` (D5).
+
+№2 typing — ``test_service_children_nest_by_service_title`` (int ok + audience
+``kid``), ``test_bad_integer_reports_starting_csv_line``,
+``test_non_numeric_integer_columns_fail``, ``test_blank_required_integer_columns_fail``,
+``test_blank_optional_numeric_columns_become_none``, bool polarities
+``test_load_accepts_is_public_both_polarities`` +
+``test_boolean_literals_parse_case_insensitive`` / ``test_non_boolean_literal_fails_with_line``
+/ ``test_empty_required_boolean_and_audience_are_rejected``, audience invalid —
+``test_tariff_audience_invalid_value_russian_error``; quoted ``;`` → positions
+assert in the template test.
+
+№3 file mechanics — ``test_csv_bom_crlf_and_case_insensitive_specialty_refs``
+(BOM + CRLF branch; every other test runs the no-BOM/LF branch),
+``test_blank_separator_lines_are_skipped``,
+``test_trailing_empty_header_columns_match_empty_data_cells``,
+``test_duplicate_section_marker_fails_with_line``,
+``test_unknown_section_and_duplicate_header_report_csv_lines``,
+``test_marker_with_non_empty_tail_fails_with_line``,
+``test_unclosed_quoted_cell_reports_record_start``,
+``test_multiline_quoted_field_error_cites_record_start``.
+
+№4 extra-column warnings — load level: ``test_extra_column_is_reported_and_ignored``
++ ``test_extra_column_warning_printed_after_summary`` +
+``test_services_is_public_column_is_extra_and_ignored``; CLI level (printed in
+EVERY mode): ``test_extra_column_warning_printed_in_every_mode``.
+
+№5 input errors — load level in №1–№3 above; full matrix at CLI level with
+exit 1 + stderr message: ``test_input_error_branches_exit_1_with_message``
+and ``test_each_required_section_is_mandatory`` (load level, all 8 sections);
+exit-2 usage errors: ``test_check_and_dry_run_together_exit_2``,
+``test_missing_csv_flag_exit_2``; --check summary without any DB:
+``test_check_prints_summary_without_touching_db``.
+
+№9 dry-run — ``test_dry_run_on_in_memory_db_prints_summary_and_changes_nothing``
+(in-memory shared-cache DB, summary printed, DB content unchanged) +
+``test_dry_run_rolls_back_all_csv_writes`` (file DB, rollback).
+
+№10 existing apply layer on CSV fixtures (issue #612 Task 4; the behavior
+suite the plan migrates from the YAML era): natural-key duplicates —
+``test_duplicate_natural_keys_fail_load`` (all eight sections/children);
+``max_age < min_age`` — ``test_max_age_below_min_age_fails_with_service_line``;
+color ``#RRGGBB`` — ``test_master_color_must_be_hex_rgb_with_staff_line``;
+exact link sync — ``test_re_run_syncs_link_sets_exactly_and_warns_for_extra_tariffs``
+(position/material links exact, tariffs deliberately non-destructive + warning);
+one transaction + rollback — ``test_apply_error_rolls_back_whole_load``;
+idempotent re-run — ``test_re_run_is_idempotent``; builtin positions by fixed
+ids — ``test_missing_builtin_positions_fail_with_alembic_hint`` +
+``test_builtin_positions_keep_fixed_ids``.
+
+№11 tags §4.7 — ``test_empty_tag_columns_clear_links_and_keep_tag_entities``
+(empty tag columns + no tags section → listed entities' links cleared, tag
+entities kept; filled columns → links created).
+
+№12 services ``is_public`` (NOT a services CSV column, spec §4.2): the model
+default True is what the file applies — create
+``test_apply_writes_service_is_public_default_true`` and re-run
+``test_re_run_applies_service_is_public_default_true`` (load level:
+``test_services_is_public_column_is_extra_and_ignored``). The shipped-YAML
+controls of #601/#606 are gone — the template fixture test above owns the
+«shipped template converges» contract (formalized as §6 №8 in Task 5).
 """
 
 from __future__ import annotations
 
+import asyncio
+import re
+import sqlite3
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
 from src.db.base import Base
 from src.db.database import DBManager
-from src.models import Location, Position, Service, Specialty
+from src.models import Location, Material, Position, Service, Staff, Tag, Tariff
+from src.models.enums import TariffAudience
+from src.models.position import staff_positions
+from src.models.service_material import ServiceMaterial
+from src.models.tag import location_tags, master_tags, service_tags
 from src.seed.reference import (
-    DEFAULT_DIR,
+    CSV_SECTIONS,
+    DEFAULT_CSV,
+    REQUIRED_SECTIONS,
+    SPECIALTY_MAX,
+    SeedDataError,
     Summary,
     apply_reference_data,
     load_reference_data,
@@ -29,27 +107,29 @@ from src.seed.reference import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 pytestmark = pytest.mark.misc
 
-# Fixture template with BOTH polarities — at least one ``is_public: false``
-# row, otherwise a loader that silently skips the column stays green.
-LOCATIONS_YAML = """\
-locations:
-  - title: Витрина
-    capacity: 10
-    is_public: true
-  - title: Закулисье
-    capacity: 5
-    is_public: false
-"""
+
+@pytest.fixture
+def csv_path(tmp_path: Path) -> Path:
+    path = tmp_path / "reference.csv"
+    path.write_text(DEFAULT_CSV.read_text(encoding="utf-8"), encoding="utf-8")
+    return path
 
 
 @pytest.fixture
-def yaml_dir(tmp_path: Path) -> Path:
-    (tmp_path / "locations.yaml").write_text(LOCATIONS_YAML, encoding="utf-8")
-    return tmp_path
+def both_public_values(csv_path: Path) -> Path:
+    text = csv_path.read_text(encoding="utf-8")
+    public_row = ";Примерная мастерская;Пример;Учебный адрес, 1;;12;;;;;;0;пример;True"
+    hidden_row = ";Скрытая мастерская;Скрытая;Учебный адрес, 2;;5;;;;;;1;;False"
+    csv_path.write_text(
+        text.replace(public_row, f"{public_row}\n{hidden_row}"),
+        encoding="utf-8",
+    )
+    return csv_path
 
 
 @pytest.fixture
@@ -71,11 +151,9 @@ async def db_manager():
     await manager.engine.dispose()
 
 
-async def _apply(
-    db_manager: DBManager, directory: Path
-) -> Summary:
+async def _apply(db_manager: DBManager, csv_path: Path) -> Summary:
     """Load + apply + commit, mirroring the CLI's real (non-dry) run."""
-    data = load_reference_data(directory)
+    data = load_reference_data(csv_path)
     summary = Summary()
     async with db_manager.async_session() as session:
         await apply_reference_data(session, data, summary)
@@ -83,29 +161,34 @@ async def _apply(
     return summary
 
 
-async def test_load_accepts_is_public_both_polarities(yaml_dir: Path) -> None:
-    """``is_public`` parses on both polarities (extra="forbid" accepts it)."""
-    data = load_reference_data(yaml_dir)
+async def test_load_accepts_is_public_both_polarities(both_public_values: Path) -> None:
+    """is_public parses on both polarities."""
+    data = load_reference_data(both_public_values)
     by_title = {loc.title: loc.is_public for loc in data.locations}
-    assert by_title == {"Витрина": True, "Закулисье": False}
+    assert by_title == {
+        "Примерная мастерская": True,
+        "Скрытая мастерская": False,
+        "Запасная площадка": False,
+    }
 
 
 async def test_apply_writes_is_public_both_polarities(
-    db_manager: DBManager, yaml_dir: Path
+    db_manager: DBManager, both_public_values: Path
 ) -> None:
     """Created rows carry the file's polarity, not just the column default."""
-    await _apply(db_manager, yaml_dir)
+    await _apply(db_manager, both_public_values)
 
     async with db_manager.async_session() as session:
-        rows = {
-            loc.title: loc.is_public
-            for loc in (await session.scalars(select(Location))).all()
-        }
-    assert rows == {"Витрина": True, "Закулисье": False}
+        rows = {loc.title: loc.is_public for loc in (await session.scalars(select(Location))).all()}
+    assert rows == {
+        "Примерная мастерская": True,
+        "Скрытая мастерская": False,
+        "Запасная площадка": False,
+    }
 
 
 async def test_re_run_updates_is_public_in_place(
-    db_manager: DBManager, yaml_dir: Path
+    db_manager: DBManager, both_public_values: Path
 ) -> None:
     """Natural-key re-run APPLIES ``is_public`` (whitelisted in the update).
 
@@ -114,145 +197,1263 @@ async def test_re_run_updates_is_public_in_place(
     column leaves the row untouched (unchanged, not updated).
     """
     async with db_manager.async_session() as session:
-        session.add(Location(title="Закулисье", capacity=5, is_public=True))
+        session.add(Location(title="Скрытая мастерская", capacity=5, is_public=True))
         await session.commit()
 
-    summary = await _apply(db_manager, yaml_dir)
+    summary = await _apply(db_manager, both_public_values)
 
     async with db_manager.async_session() as session:
         row = (
-            await session.scalars(select(Location).where(Location.title == "Закулисье"))
+            await session.scalars(select(Location).where(Location.title == "Скрытая мастерская"))
         ).one()
     assert row.is_public is False
     assert summary.bucket("Локации").updated == 1
 
 
-def test_shipped_locations_yaml_all_public_and_check_converges() -> None:
-    """Control: the shipped ``seed-data/`` passes ``--check`` and every
-    current location is ``is_public: true`` (spec §2.7: все 3 — true)."""
-    data = load_reference_data(DEFAULT_DIR)
-    assert len(data.locations) == 3
-    assert all(loc.is_public for loc in data.locations), (
-        [loc.title for loc in data.locations if not loc.is_public],
-    )
-    assert main(["--check"]) == 0
+def test_shipped_csv_template_checks_and_has_linked_specialties() -> None:
+    data = load_reference_data(DEFAULT_CSV)
+    # Spec §5.2: the shipped template carries BOTH is_public polarities —
+    # the «template is always valid» contract includes the demo of every
+    # column value shape the owner's real file may use.
+    assert len(data.locations) == 2
+    assert {loc.title: loc.is_public for loc in data.locations} == {
+        "Примерная мастерская": True,
+        "Запасная площадка": False,
+    }
+    assert data.specialties == ["Моделирование", "Графика"]
+    assert data.services[0].specialty == "Графика"
+    assert [item.title for item in data.services[0].materials] == ["Учебный материал"]
+    assert [item.title for item in data.services[0].tariffs] == ["Обычный"]
+    assert data.staff[0].master is not None
+    assert data.staff[0].master.specialties == ["Графика", "Моделирование"]
+    assert data.staff[0].positions == ["Мастер", "Администратор"]
+    assert main(["--csv", str(DEFAULT_CSV), "--check"]) == 0
 
 
-# ---------------------------------------------------------------------------
-# GH #606 — services ``is_public`` (mirror of the locations section above)
-# ---------------------------------------------------------------------------
+def test_csv_bom_crlf_and_case_insensitive_specialty_refs(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";Графика;8;;90;;пример", ";гРАФИКА;8;;90;;пример")
+    text = text.replace('"Графика;Моделирование"', '"гРАФИКА;мОДЕЛИРОВАНИЕ"')
+    csv_path.write_text("\ufeff" + text.replace("\n", "\r\n"), encoding="utf-8")
 
-# GH #599: services.yaml references specialties BY TITLE — the loader
-# resolves them case-insensitively against the specialties.yaml
-# dictionary (unknown title → load error), so the fixture dir must
-# declare every title the services section uses (the
-# test_seed_reference_specialties.py pattern).
-SPECIALTIES_YAML = """\
-specialties:
-  - Живопись
-  - Керамика
-"""
-
-# Fixture template with BOTH polarities — at least one ``is_public: false``
-# row, otherwise a loader that silently skips the column stays green.
-SERVICES_YAML = """\
-services:
-  - title: Витринная услуга
-    description: "Показывается на сайте"
-    image_url: "/images/card-watercolor.jpg"
-    specialty: живопись
-    min_age: 6
-    duration: 90
-    record_info: ""
-    is_public: true
-  - title: Закулисная услуга
-    description: "Скрыта с сайта"
-    image_url: "/images/card-animals.jpg"
-    specialty: керамика
-    min_age: 5
-    duration: 60
-    record_info: ""
-    is_public: false
-"""
+    data = load_reference_data(csv_path)
+    assert data.services[0].specialty == "гРАФИКА"
+    assert data.staff[0].master is not None
+    assert data.staff[0].master.specialties == ["гРАФИКА", "мОДЕЛИРОВАНИЕ"]
 
 
-@pytest.fixture
-def services_yaml_dir(tmp_path: Path) -> Path:
-    (tmp_path / "specialties.yaml").write_text(SPECIALTIES_YAML, encoding="utf-8")
-    (tmp_path / "services.yaml").write_text(SERVICES_YAML, encoding="utf-8")
-    return tmp_path
+def test_tags_section_is_optional_and_absence_clears_tag_lists(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";0;пример;True", ";0;;True")
+    text = text.replace(";90;;пример", ";90;;")
+    text = text.replace(";#456789;True;пример", ";#456789;True;")
+    text = text.replace("\ntags\n;title\n;пример\n;демонстрация\n\nspecialty", "\nspecialty")
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert data.tags == []
+    assert data.locations[0].tags == []
+    assert data.services[0].tags == []
+    assert data.staff[0].master is not None
+    assert data.staff[0].master.tags == []
 
 
-async def test_load_accepts_service_is_public_both_polarities(
-    services_yaml_dir: Path,
-) -> None:
-    """Service ``is_public`` parses on both polarities (extra="forbid")."""
-    data = load_reference_data(services_yaml_dir)
-    by_title = {svc.title: svc.is_public for svc in data.services}
-    assert by_title == {"Витринная услуга": True, "Закулисная услуга": False}
+def test_blank_optional_numeric_columns_become_none(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";Алексей;Примеров;0;;", ";Алексей;Примеров;;;")
+    text = text.replace(";0;пример;True", ";;пример;True")
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert data.services[0].max_age is None
+    assert data.staff[0].sort_order is None
+    assert data.locations[0].sort_order is None
 
 
-async def test_apply_writes_service_is_public_both_polarities(
-    db_manager: DBManager, services_yaml_dir: Path
-) -> None:
-    """Created rows carry the file's polarity, not just the column default."""
-    await _apply(db_manager, services_yaml_dir)
+def test_empty_required_boolean_and_audience_are_rejected(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace(";0;пример;True", ";0;пример;"))
+    with pytest.raises(SeedDataError, match=r"строка .*is_public"):
+        load_reference_data(csv_path)
 
-    async with db_manager.async_session() as session:
-        rows = {
-            svc.title: svc.is_public
-            for svc in (await session.scalars(select(Service))).all()
-        }
-    assert rows == {"Витринная услуга": True, "Закулисная услуга": False}
-
-
-async def test_re_run_updates_service_is_public_in_place(
-    db_manager: DBManager, services_yaml_dir: Path
-) -> None:
-    """Natural-key re-run APPLIES service ``is_public`` (update whitelist).
-
-    Pre-existing row «Закулисная услуга» is public in the DB; the file says
-    ``is_public: false`` → the update must flip it. A loader that skips the
-    column leaves the row untouched (unchanged, not updated).
-    """
-    async with db_manager.async_session() as session:
-        # GH #599: the direction is a NOT NULL FK — seed the dictionary
-        # row first (the yaml «Керамика» upsert then finds it by
-        # lower(title), so ``specialty_id`` survives the re-run unchanged)
-        # and link the pre-existing service to it (the ORM ``specialty``
-        # is a read-only property, not a column).
-        session.add(Specialty(id="spec-ceramics", title="Керамика"))
-        session.add(
-            Service(
-                title="Закулисная услуга",
-                description="Скрыта с сайта",
-                image_url="/images/card-animals.jpg",
-                specialty_id="spec-ceramics",
-                min_age=5,
-                duration=60,
-                record_info="",
-                is_public=True,
-            )
+    text = DEFAULT_CSV.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ";Обычный;Демонстрационный тариф;1000;all", ";Обычный;Демонстрационный тариф;1000;"
         )
+    )
+    with pytest.raises(SeedDataError, match=r"строка .*audience"):
+        load_reference_data(csv_path)
+
+
+def test_blank_master_active_defaults_to_true(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace(";#456789;True;пример", ";#456789;;пример"))
+
+    data = load_reference_data(csv_path)
+    assert data.staff[0].master is not None
+    assert data.staff[0].master.is_active is True
+
+
+def test_bad_integer_reports_starting_csv_line(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace(";Графика;8;;90;;пример", ";Графика;много;;90;;пример"))
+
+    with pytest.raises(SeedDataError, match=r"строка 8 .*min_age"):
+        load_reference_data(csv_path)
+
+
+def test_unknown_staff_position_fails_during_check(csv_path: Path) -> None:
+    """Spec §6 №6: an undeclared staff position is a VALIDATION-stage
+    error whose text mirrors the apply layer («должность … не найдена …
+    блоке positions», #612 Task 2) — and ``--check`` (no DB) catches it
+    with exit 1."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ';Алексей;Примеров;0;;"Мастер;Администратор";',
+        ";Алексей;Примеров;0;;Неизвестная;",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 24: ")
+    assert (
+        "staff «Алексей Примеров»: должность «Неизвестная» не найдена. "
+        "Объявите её в блоке positions или поправьте название" in message
+    )
+    assert main(["--csv", str(csv_path), "--check"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 items №6–№7 (issue #612 Task 2): cross-reference validation runs
+# on the CSV-assembled ReferenceData BEFORE any DB work (--check-visible);
+# positions/specialty errors mirror the apply-layer texts, service and
+# material references carry the referencing row's line.
+# ---------------------------------------------------------------------------
+
+
+def test_tariff_reference_to_unknown_service_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №6: a tariffs row pointing at a service missing from the
+    services section is a load error naming the service, with the tariff
+    row's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all",
+            ";Неизвестная услуга;Обычный;Демонстрационный тариф;1000;all",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 20: ")
+    assert "услуга «Неизвестная услуга» из tariffs не найдена в секции services" in message
+
+
+def test_service_materials_unknown_material_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №6: a service_materials row naming a material missing from
+    the materials section is a load error naming the material, with the
+    row's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
+            ";Линогравюра для примера;Неизвестный материал;",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 16: ")
+    assert "материал «Неизвестный материал» не найден в секции materials" in message
+
+
+def test_service_materials_unknown_service_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №5 branch: a service_materials link referencing a service
+    that does not exist anywhere in the file is a load error naming the
+    service, with the referencing row's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
+            ";Неизвестная услуга;Учебный материал;",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 16: ")
+    assert (
+        "услуга «Неизвестная услуга» из service_materials "
+        "не найдена в секции services" in message
+    )
+
+
+def test_unknown_service_specialty_fails_naming_value(csv_path: Path) -> None:
+    """Spec §6 №7: a ``services.specialty`` title absent from the specialty
+    section is a VALIDATION-stage error naming the value — the mirror of
+    the apply-layer «не найдено в справочнике» text (case-insensitive
+    resolve, so «Графика» in any case passes; «Батик» must not)."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(";Графика;8;;90;;пример", ";Батик;8;;90;;пример"), encoding="utf-8"
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 8: ")
+    assert (
+        "services «Линогравюра для примера»: направление «Батик» "
+        "не найдено в справочнике. Объявите его в секции specialty "
+        "или поправьте название" in message
+    )
+
+
+def test_unknown_master_specialty_fails_naming_value(csv_path: Path) -> None:
+    """Spec §6 №7: a ``master_specialty`` title absent from the specialty
+    section is a validation-stage error naming the person and the value —
+    the apply-layer mirror (D5 keeps requiring ≥1 live direction)."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace('"Графика;Моделирование"', '"Графика;Батик"'), encoding="utf-8"
+    )
+
+    with pytest.raises(SeedDataError) as exc_info:
+        load_reference_data(csv_path)
+    message = str(exc_info.value)
+    assert message.startswith("строка 24: ")
+    assert (
+        "staff «Алексей Примеров»: направление «Батик» "
+        "не найдено в справочнике. Объявите его в секции specialty "
+        "или поправьте название" in message
+    )
+
+
+def test_master_block_requires_specialty_and_color(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace('"Графика;Моделирование";#456789', '"";#456789'))
+
+    with pytest.raises(SeedDataError, match="master_specialty обязателен"):
+        load_reference_data(csv_path)
+
+
+def test_unknown_section_and_duplicate_header_report_csv_lines(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("\nmaterials\n", "\nunknown_section\n"))
+    with pytest.raises(SeedDataError, match=r"строка 10: неизвестная секция"):
+        load_reference_data(csv_path)
+
+    text = DEFAULT_CSV.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags",
+            ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags;tags",
+        )
+    )
+    with pytest.raises(SeedDataError, match=r"строка 7 .*повтор колонки tags"):
+        load_reference_data(csv_path)
+
+
+def test_unclosed_quoted_cell_reports_record_start(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("Демонстрационная услуга", '"Демонстрационная услуга'))
+
+    with pytest.raises(SeedDataError, match=r"строка 8: ошибка CSV"):
+        load_reference_data(csv_path)
+
+
+def test_extra_column_is_reported_and_ignored(
+    csv_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";record_info;tags\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";record_info;tags;legacy_flag\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;unused",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert data.services[0].title == "Линогравюра для примера"
+    assert "services.legacy_flag" in capsys.readouterr().out
+
+
+def test_trailing_empty_header_columns_match_empty_data_cells(csv_path: Path) -> None:
+    lines = csv_path.read_text(encoding="utf-8").splitlines()
+    active: str | None = None
+    for index, line in enumerate(lines):
+        if line == "services":
+            active = "services"
+        elif line and not line.startswith(";"):
+            active = None
+        if active == "services" and line.startswith(";"):
+            lines[index] += ";;"
+    csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert data.services[0].title == "Линогравюра для примера"
+
+
+def test_unmatched_extra_data_cell_is_rejected(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(SeedDataError, match=r"строка 8 .*колонок данных, в шапке 9"):
+        load_reference_data(csv_path)
+
+
+def test_dry_run_rolls_back_all_csv_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database_path = tmp_path / "dry-run.db"
+    database_url = f"sqlite+aiosqlite:///{database_path}"
+
+    async def create_schema() -> None:
+        manager = DBManager(database_url)
+        async with manager.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with manager.async_session() as session:
+            session.add(Position(id="master", title="Мастер", is_system=True))
+            session.add(Position(id="admin", title="Администратор", is_system=True))
+            await session.commit()
+        await manager.engine.dispose()
+
+    async def assert_no_locations() -> None:
+        manager = DBManager(database_url)
+        async with manager.async_session() as session:
+            assert list((await session.scalars(select(Location))).all()) == []
+        await manager.engine.dispose()
+
+    asyncio.run(create_schema())
+
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    assert main(["--csv", str(DEFAULT_CSV), "--dry-run"]) == 0
+    asyncio.run(assert_no_locations())
+
+
+def test_missing_section_is_reported_with_csv_line(csv_path: Path) -> None:
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("\nspecialty\n;Моделирование\n;Графика\n", ""))
+
+    with pytest.raises(
+        SeedDataError, match=r"строка .* отсутствуют обязательные секции: specialty"
+    ):
+        load_reference_data(csv_path)
+
+
+# ---------------------------------------------------------------------------
+# Audit vs spec §4 (subtask 1.2): dictionary-section bounds (#599 contract)
+# and operator-facing Russian errors for source-typed columns.
+# ---------------------------------------------------------------------------
+
+
+def test_specialty_title_over_column_width_fails_with_line(csv_path: Path) -> None:
+    """A dictionary title beyond the String(100) column fails at PARSE time —
+    a clean SeedDataError with the record line, not a raw DB error
+    (domain rules specialties.md: the SPECIALTY_MAX bound ServiceIn and
+    MasterIn already carry, mirrored for the dictionary itself)."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("\n;Графика", f"\n;{'А' * (SPECIALTY_MAX + 1)}"))
+
+    with pytest.raises(
+        SeedDataError, match=rf"строка 38 \(specialty\).*длиннее {SPECIALTY_MAX} символов"
+    ):
+        load_reference_data(csv_path)
+
+
+def test_specialty_section_ci_duplicates_fail_load(csv_path: Path) -> None:
+    """Two titles equal modulo case are one dictionary row (the DB's
+    lower(title) unique index) — the section must not list the pair."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("\n;Графика", "\n;Графика\n;ГРАФИКА"))
+
+    with pytest.raises(SeedDataError, match=r"строка 39.*дважды"):
+        load_reference_data(csv_path)
+
+
+def test_tariff_audience_invalid_value_russian_error(csv_path: Path) -> None:
+    """``audience`` is source-typed (spec §4.4, same league as int/bool):
+    anything outside kid/adult/all — including empty — is a Russian
+    operator-facing error, not a wrapped English pydantic message."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace(";1000;all", ";1000;подростки"))
+
+    with pytest.raises(SeedDataError, match=r"строка 20 .*kid, adult или all"):
+        load_reference_data(csv_path)
+
+
+def test_extra_column_warning_printed_after_summary(
+    csv_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Extra-column warnings form an end-of-run list (plan Task 1) — printed
+    after the loading summary, not inline mid-parse."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";record_info;tags\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";record_info;tags;legacy_flag\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;unused",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    load_reference_data(csv_path)
+    out = capsys.readouterr().out
+    assert out.index("лишняя колонка services.legacy_flag") > out.index("локаций")
+
+
+def test_multiline_quoted_field_error_cites_record_start(csv_path: Path) -> None:
+    """A quoted field may span physical lines (spec §4.1); an error inside
+    such a record must cite the record's START line (§6 test 3)."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ';Линогравюра для примера;"многострочное\nописание";;Графика;много;;90;;пример',
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(SeedDataError, match=r"строка 8 .*min_age"):
+        load_reference_data(csv_path)
+
+
+def test_services_is_public_column_is_extra_and_ignored(
+    csv_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``is_public`` is NOT in the services contract (spec §4.2): the column
+    falls under the generic extra-column warning and the model keeps its
+    default (GH #606 left services visibility admin-side for the loader)."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";record_info;tags\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";record_info;tags;is_public\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;False",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert data.services[0].is_public is True
+    assert "лишняя колонка services.is_public" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 items №1–№3 completion (issue #612 Task 1.3): section assembly,
+# source-side typing, file mechanics. Test map lives in the module docstring.
+# ---------------------------------------------------------------------------
+
+
+def _drop_section(text: str, name: str) -> str:
+    """Remove one whole section block (marker line through the line before
+    the next marker/EOF) — the missing-section test's mutation."""
+    kept: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        if line.strip() in CSV_SECTIONS:
+            skipping = line.strip() == name
+            if skipping:
+                continue
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept) + "\n"
+
+
+@pytest.mark.parametrize("section", sorted(REQUIRED_SECTIONS))
+def test_each_required_section_is_mandatory(csv_path: Path, section: str) -> None:
+    """Spec §6 №1: any of the eight required sections absent → load error
+    naming exactly that section."""
+    csv_path.write_text(_drop_section(csv_path.read_text(encoding="utf-8"), section))
+    with pytest.raises(
+        SeedDataError, match=rf"строка \d+: отсутствуют обязательные секции: {section}$"
+    ):
+        load_reference_data(csv_path)
+
+
+def test_tags_section_present_collects_tags() -> None:
+    """Spec §6 №1: with the optional ``tags`` section present, the dictionary
+    is collected and tag columns assemble into entity tag lists."""
+    data = load_reference_data(DEFAULT_CSV)
+    # Spec §5.2: 1–2 example tags; the second («демонстрация») stays
+    # unreferenced — a dictionary entry may wait for future links.
+    assert data.tags == ["пример", "демонстрация"]
+    assert data.locations[0].tags == ["пример"]
+    assert data.services[0].tags == ["пример"]
+    assert data.staff[0].master is not None
+    assert data.staff[0].master.tags == ["пример"]
+
+
+def test_service_children_nest_by_service_title(csv_path: Path) -> None:
+    """Spec §6 №1: service_materials/tariffs rows nest under the service with
+    the matching ``service_title`` — and only under it."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример\n"
+        ";Керамика для примера;Вторая услуга;;Моделирование;6;;60;;",
+    )
+    text = text.replace(
+        ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
+        ";Линогравюра для примера;Учебный материал;Для демонстрации связи\n"
+        ";Керамика для примера;Учебный материал;",
+    )
+    text = text.replace(
+        ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all",
+        ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all\n"
+        ";Керамика для примера;Льготный;Тариф второй услуги;500;kid",
+    )
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    by_title = {service.title: service for service in data.services}
+    assert set(by_title) == {"Линогравюра для примера", "Керамика для примера"}
+
+    linogravure = by_title["Линогравюра для примера"]
+    assert [item.title for item in linogravure.materials] == ["Учебный материал"]
+    assert [item.title for item in linogravure.tariffs] == ["Обычный"]
+
+    ceramics = by_title["Керамика для примера"]
+    assert (ceramics.min_age, ceramics.duration) == (6, 60)
+    assert [item.title for item in ceramics.materials] == ["Учебный материал"]
+    assert [item.title for item in ceramics.tariffs] == ["Льготный"]
+    assert ceramics.tariffs[0].price == 500
+    assert ceramics.tariffs[0].audience == TariffAudience.KID
+
+
+def test_staff_row_without_master_columns_has_no_master_block(csv_path: Path) -> None:
+    """Spec §6 №1 / §4.3: every master_* cell empty → no block is assembled
+    and the staff person still parses."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace(
+            ';Алексей;Примеров;0;;"Мастер;Администратор";"Графика;Моделирование";#456789;True;пример',
+            ';Алексей;Примеров;0;;"Мастер;Администратор";;;;',
+        ),
+        encoding="utf-8",
+    )
+
+    data = load_reference_data(csv_path)
+    assert data.staff[0].master is None
+    assert data.staff[0].positions == ["Мастер", "Администратор"]
+
+
+def test_partial_master_fill_reports_staff_line(csv_path: Path) -> None:
+    """Spec §6 №1 / §4.3: partial master_* fill is an explicit error with the
+    record's line — both directions plus a tags-only fragment."""
+    full = csv_path.read_text(encoding="utf-8")
+
+    csv_path.write_text(full.replace(";#456789;True;пример", ";;True;пример"))
+    with pytest.raises(SeedDataError, match=r"строка 24 .*master_color обязателен"):
+        load_reference_data(csv_path)
+
+    csv_path.write_text(
+        full.replace('"Графика;Моделирование";#456789;True;пример', '"";;;пример'),
+        encoding="utf-8",
+    )
+    with pytest.raises(SeedDataError, match=r"строка 24 .*master_specialty обязателен"):
+        load_reference_data(csv_path)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "section", "column", "line"),
+    [
+        ("Учебный адрес, 1;;12;", "Учебный адрес, 1;;;", "locations", "capacity", 3),
+        (";Графика;8;;90;", ";Графика;;;90;", "services", "min_age", 8),
+        (";Графика;8;;90;", ";Графика;8;;;", "services", "duration", 8),
+        (
+            ";Демонстрационный тариф;1000;all",
+            ";Демонстрационный тариф;;all",
+            "tariffs",
+            "price",
+            20,
+        ),
+    ],
+)
+def test_blank_required_integer_columns_fail(
+    csv_path: Path,
+    original: str,
+    replacement: str,
+    section: str,
+    column: str,
+    line: int,
+) -> None:
+    """Spec §6 №2 / §4.4: capacity/min_age/duration/price never degrade to 0
+    or null — an empty cell is a load error with the record line."""
+    text = csv_path.read_text(encoding="utf-8")
+    assert original in text
+    csv_path.write_text(text.replace(original, replacement), encoding="utf-8")
+
+    with pytest.raises(
+        SeedDataError,
+        match=rf"строка {line} \({section}\): колонка {column} должна содержать целое число",
+    ):
+        load_reference_data(csv_path)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "section", "column", "line"),
+    [
+        (
+            "Учебный адрес, 1;;12;",
+            "Учебный адрес, 1;;двенадцать;",
+            "locations",
+            "capacity",
+            3,
+        ),
+        (
+            ";Демонстрационный тариф;1000;all",
+            ";Демонстрационный тариф;1000р;all",
+            "tariffs",
+            "price",
+            20,
+        ),
+    ],
+)
+def test_non_numeric_integer_columns_fail(
+    csv_path: Path,
+    original: str,
+    replacement: str,
+    section: str,
+    column: str,
+    line: int,
+) -> None:
+    """Spec §6 №2 / §4.4: a non-numeric cell in ANY integer column (not just
+    min_age) is a load error with the record line."""
+    text = csv_path.read_text(encoding="utf-8")
+    assert original in text
+    csv_path.write_text(text.replace(original, replacement), encoding="utf-8")
+
+    with pytest.raises(
+        SeedDataError,
+        match=rf"строка {line} \({section}\): в колонке {column} ожидалось целое число",
+    ):
+        load_reference_data(csv_path)
+
+
+def test_boolean_literals_parse_case_insensitive(csv_path: Path) -> None:
+    """Spec §6 №2 / §4.4: True/False literals parse in any case, both bool
+    columns, both polarities."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";0;пример;True", ";0;пример;TRUE")
+    text = text.replace(";#456789;True;пример", ";#456789;fAlSe;пример")
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert data.locations[0].is_public is True
+    assert data.staff[0].master is not None
+    assert data.staff[0].master.is_active is False
+
+
+def test_non_boolean_literal_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №2 / §4.4: anything but True/False (case-insensitive) in a
+    bool column is a load error with the record line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace(";0;пример;True", ";0;пример;да"), encoding="utf-8")
+
+    with pytest.raises(SeedDataError, match=r"строка 3 .*is_public ожидалось True или False"):
+        load_reference_data(csv_path)
+
+
+def test_blank_separator_lines_are_skipped(csv_path: Path) -> None:
+    """Spec §6 №3: fully blank rows — mid-section, doubled, or between
+    sections — are skipped without corrupting the parsed rows."""
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";Мастер\n", ";Мастер\n\n")
+    text = text.replace(";Администратор\n", ";Администратор\n\n\n")
+    text = text.replace("\nstaff\n", "\n\n\nstaff\n")
+    csv_path.write_text(text, encoding="utf-8")
+
+    data = load_reference_data(csv_path)
+    assert [item.title for item in data.positions] == ["Мастер", "Администратор"]
+    assert data.staff[0].master is not None
+
+
+def test_duplicate_section_marker_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №3 / §4.1: a second marker of an already-seen section is a
+    load error citing the duplicate marker's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(
+        text.replace("\ntags\n", "\nmaterials\n;title\n;Дополнительный материал\n\ntags\n"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SeedDataError, match=r"строка 31: секция materials повторяется"):
+        load_reference_data(csv_path)
+
+
+def test_marker_with_non_empty_tail_fails_with_line(csv_path: Path) -> None:
+    """Spec §6 №3 / §4.1: a marker row with a non-empty tail cell is NOT a
+    marker — the row errors with its own line number."""
+    text = csv_path.read_text(encoding="utf-8")
+    csv_path.write_text(text.replace("\nmaterials\n", "\nmaterials;примечание\n"), encoding="utf-8")
+
+    with pytest.raises(SeedDataError, match=r"строка 10 .*первая колонка должна быть пустой"):
+        load_reference_data(csv_path)
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 items №4/№5/№9 (issue #612 Task 3): CLI exit-code discipline and
+# mode coverage. The audit found the salvaged CLI already implements every
+# bullet — these tests close the missing §6 matrices: exit 1 for EVERY input
+# error branch at main() level (previously load-level only, and five branches
+# untested anywhere), exit 2 for usage errors, --check summary without a DB,
+# extra-column warnings in ALL three modes, and the dry-run on an in-memory
+# DB (summary printed + content unchanged).
+# ---------------------------------------------------------------------------
+
+_BUILTIN_POSITIONS = (
+    Position(id="master", title="Мастер", is_system=True),
+    Position(id="admin", title="Администратор", is_system=True),
+)
+
+
+def _mutated(csv_path: Path, original: str, replacement: str) -> Path:
+    """Apply a single text mutation to the CSV copy, asserting it hit."""
+    text = csv_path.read_text(encoding="utf-8")
+    assert original in text, f"mutation source not found: {original!r}"
+    csv_path.write_text(text.replace(original, replacement), encoding="utf-8")
+    return csv_path
+
+
+def _memory_db(monkeypatch: pytest.MonkeyPatch, name: str) -> tuple[str, sqlite3.Connection]:
+    """A shared-cache IN-MEMORY DB the CLI's own engine can reach (spec §6 №9).
+
+    A raw ``sqlite3`` keeper connection holds the memory DB alive across the
+    ``main()`` call (its engine connects/disposes on its own); the schema and
+    the migration-seeded builtin positions mirror the ``db_manager`` fixture.
+    Returns the URI path (``file:…?mode=memory&cache=shared``) and the keeper.
+    """
+    uri = f"file:{name}?mode=memory&cache=shared&uri=true"
+    keeper = sqlite3.connect(uri, uri=True)
+    engine = create_engine(f"sqlite:///{uri}", future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            session.add_all(
+                Position(id=row.id, title=row.title, is_system=row.is_system)
+                for row in _BUILTIN_POSITIONS
+            )
+            session.commit()
+    finally:
+        engine.dispose()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{uri}")
+    return uri, keeper
+
+
+def test_check_and_dry_run_together_exit_2(csv_path: Path) -> None:
+    """Spec §1 / §6 №5: ``--check`` and ``--dry-run`` are mutually exclusive —
+    argparse rejects the pair as a USAGE error (exit 2, not a data error 1)."""
+    with pytest.raises(SystemExit) as raised:
+        main(["--csv", str(csv_path), "--check", "--dry-run"])
+    assert raised.value.code == 2
+
+
+def test_missing_csv_flag_exit_2() -> None:
+    """Spec §1: ``--csv`` is required — omitting it is a usage error (exit 2)."""
+    with pytest.raises(SystemExit) as raised:
+        main([])
+    assert raised.value.code == 2
+
+
+# Spec §6 №5: every input-error branch through main() — exit 1 + a clear
+# operator-facing message on stderr («внятная ошибка»), not a traceback.
+_INPUT_ERROR_CASES: list[tuple[str, Callable[[Path], Path], str]] = [
+    (
+        "нет файла",
+        lambda p: p.with_name("missing.csv"),
+        "не найден или это не файл",
+    ),
+    (
+        "каталог вместо файла",
+        lambda p: p.parent,
+        "Ожидался CSV-файл, получена папка",
+    ),
+    (
+        "файл без секций",
+        lambda p: _write_csv(p.with_name("no-sections.csv"), "\n\n"),
+        "CSV не содержит секций",
+    ),
+    (
+        "нет обязательной секции",
+        lambda p: _write_csv(p, _drop_section(p.read_text(encoding="utf-8"), "positions")),
+        "отсутствуют обязательные секции: positions",
+    ),
+    (
+        "неизвестная секция",
+        lambda p: _mutated(p, "\nmaterials\n", "\nunknown_section\n"),
+        "неизвестная секция",
+    ),
+    (
+        "повтор секции",
+        lambda p: _mutated(
+            p, "\ntags\n", "\nmaterials\n;title\n;Дополнительный материал\n\ntags\n"
+        ),
+        "секция materials повторяется",
+    ),
+    (
+        "шапка без обязательной колонки",
+        lambda p: _mutated(
+            p,
+            ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags",
+            ";title;description;image_url;min_age;max_age;duration;record_info;tags",
+        ),
+        "нет обязательных колонок: specialty",
+    ),
+    (
+        "дубль имени колонки",
+        lambda p: _mutated(
+            p,
+            ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags",
+            ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags;tags",
+        ),
+        "повтор колонки tags",
+    ),
+    (
+        "строка данных короче шапки",
+        lambda p: _mutated(
+            p,
+            ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+            ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90",
+        ),
+        "в строке 7 колонок данных, в шапке 9",
+    ),
+    (
+        "строка данных длиннее шапки",
+        lambda p: _mutated(
+            p,
+            ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+            ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;",
+        ),
+        "в строке 10 колонок данных, в шапке 9",
+    ),
+    (
+        "битая кавычка",
+        lambda p: _mutated(p, "Демонстрационная услуга", '"Демонстрационная услуга'),
+        "ошибка CSV",
+    ),
+]
+
+
+def _write_csv(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    ("case", "prepare", "fragment"),
+    _INPUT_ERROR_CASES,
+    ids=[case for case, _, _ in _INPUT_ERROR_CASES],
+)
+def test_input_error_branches_exit_1_with_message(
+    csv_path: Path,
+    case: str,
+    prepare: Callable[[Path], Path],
+    fragment: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec §6 №5 / DoD Task 3: each input-error branch surfaces through the
+    CLI as exit 1 with a clear Russian message on stderr."""
+    broken = prepare(csv_path)
+    assert main(["--csv", str(broken), "--check"]) == 1
+    assert fragment in capsys.readouterr().err
+
+
+def test_check_prints_summary_without_touching_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec §2 scenario 1 / §6 DoD: ``--check`` = parser + cross-validation +
+    per-section entity summary, with NO database work — a poisoned
+    DATABASE_URL (unopenable path) proves the seam: any connection attempt
+    would fail the run."""
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:////nonexistent-dir-612/memo.db")
+    assert main(["--csv", str(DEFAULT_CSV), "--check"]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "локаций 2, услуг 1, тегов 2, материалов 1, направлений 2, "
+        "сотрудников 1, должностей 2" in out
+    )
+    assert "Проверка пройдена" in out
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [["--check"], ["--dry-run"], []],
+    ids=["check", "dry-run", "apply"],
+)
+def test_extra_column_warning_printed_in_every_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: list[str],
+) -> None:
+    """Spec §6 №4 + Task 3 bullet: the extra-column warning (the «секция +
+    колонка» list) prints in EVERY mode — --check, --dry-run and the real
+    apply run — and never fails the run (exit 0)."""
+    text = DEFAULT_CSV.read_text(encoding="utf-8")
+    text = text.replace(
+        ";record_info;tags\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";record_info;tags;legacy_flag\n;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример;unused",
+    )
+    csv_file = _write_csv(tmp_path / "reference.csv", text)
+
+    slug = "_".join(flag.lstrip("-").replace("-", "_") for flag in mode) or "apply"
+    _, keeper = _memory_db(monkeypatch, f"seed612_warn_{slug}")
+    try:
+        assert main(["--csv", str(csv_file), *mode]) == 0
+        assert "лишняя колонка services.legacy_flag" in capsys.readouterr().out
+    finally:
+        keeper.close()
+
+
+def test_dry_run_on_in_memory_db_prints_summary_and_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Spec §6 №9: dry-run is a FULL apply pass on an in-memory DB inside a
+    rolled-back transaction — the summary prints, and the DB content is
+    exactly what it was before the run (only the migration-seeded builtin
+    positions)."""
+    uri, keeper = _memory_db(monkeypatch, "seed612_dryrun")
+    try:
+        assert main(["--csv", str(DEFAULT_CSV), "--dry-run"]) == 0
+
+        out = capsys.readouterr().out
+        assert "Итог:" in out
+        assert "Локации: создано 2, обновлено 0, без изменений 0" in out
+        assert "Услуги: создано 1, обновлено 0, без изменений 0" in out
+        assert "ПРОБНЫЙ ЗАПУСК: изменения откатаны, база не изменена." in out
+
+        engine = create_engine(f"sqlite:///{uri}", future=True)
+        try:
+            with Session(engine) as session:
+                assert list(session.scalars(select(Location))) == []
+                assert list(session.scalars(select(Service))) == []
+                assert list(session.scalars(select(Staff))) == []
+                assert sorted(
+                    (row.id, row.title) for row in session.scalars(select(Position))
+                ) == [("admin", "Администратор"), ("master", "Мастер")]
+        finally:
+            engine.dispose()
+    finally:
+        keeper.close()
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 №10 (issue #612 Task 4): the existing apply layer — unchanged
+# behavior, CSV-era message texts. Natural keys, row validation, exact link
+# sync, one transaction, idempotency, builtin positions.
+# ---------------------------------------------------------------------------
+
+# Each case inserts a natural-key duplicate right after the original row:
+# (anchor row text, duplicate row text, expected duplicate line, «what» the
+# error names, the duplicated value).
+_DUPLICATE_CASES: list[tuple[str, str, int, str, str]] = [
+    (
+        ";Примерная мастерская;Пример;Учебный адрес, 1;;12;;;;;;0;пример;True",
+        ";Примерная мастерская;Дубль;Учебный адрес, 2;;5;;;;;;1;;False",
+        4,
+        "секция locations",
+        "Примерная мастерская",
+    ),
+    (
+        ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
+        ";Линогравюра для примера;Дубль;;Графика;8;;90;;",
+        9,
+        "секция services",
+        "Линогравюра для примера",
+    ),
+    (
+        ";Учебный материал;Материал только для примера",
+        ";Учебный материал;Дубль",
+        13,
+        "секция materials",
+        "Учебный материал",
+    ),
+    (
+        "\n;Мастер",
+        ";Мастер",
+        29,
+        "секция positions",
+        "Мастер",
+    ),
+    (
+        "\n;пример",
+        ";пример",
+        34,
+        "секция tags",
+        "пример",
+    ),
+    (
+        ';Алексей;Примеров;0;;"Мастер;Администратор";"Графика;Моделирование";#456789;True;пример',
+        ";Алексей;Примеров;1;;;;;;",
+        25,
+        "секция staff",
+        "Алексей Примеров",
+    ),
+    (
+        ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all",
+        ";Линогравюра для примера;Обычный;Дубль тарифа;2000;kid",
+        21,
+        "services «Линогравюра для примера» (tariffs)",
+        "Обычный",
+    ),
+    (
+        ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
+        ";Линогравюра для примера;Учебный материал;",
+        17,
+        "services «Линогравюра для примера» (materials)",
+        "Учебный материал",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("anchor", "duplicate", "line", "what", "value"),
+    _DUPLICATE_CASES,
+    ids=["locations", "services", "materials", "positions", "tags", "staff", "tariffs", "materials-link"],
+)
+def test_duplicate_natural_keys_fail_load(
+    csv_path: Path, anchor: str, duplicate: str, line: int, what: str, value: str
+) -> None:
+    """Spec §6 №10 / §4.6: every natural key (title / first+last name, and
+    the child sets under a service) must be unique in the file — a duplicate
+    is a load error citing the duplicate row's line."""
+    text = csv_path.read_text(encoding="utf-8")
+    assert anchor in text
+    csv_path.write_text(text.replace(anchor, f"{anchor}\n{duplicate}"), encoding="utf-8")
+
+    with pytest.raises(
+        SeedDataError,
+        match=rf"строка {line}: {re.escape(what)}: значение «{value}» встречается дважды",
+    ):
+        load_reference_data(csv_path)
+
+
+def test_max_age_below_min_age_fails_with_service_line(csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: ``max_age < min_age`` is a row-validation error —
+    the CSV-era text carries the record line instead of a file name."""
+    _mutated(csv_path, ";Графика;8;;90;", ";Графика;8;3;90;")
+
+    with pytest.raises(
+        SeedDataError, match=r"строка 8 \(services\).*max_age не может быть меньше min_age"
+    ):
+        load_reference_data(csv_path)
+
+
+def test_master_color_must_be_hex_rgb_with_staff_line(csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: the master color must match ``#RRGGBB`` — a bad
+    cell is a row-validation error with the record line."""
+    _mutated(csv_path, ";#456789;True;пример", ";456789;True;пример")
+
+    with pytest.raises(
+        SeedDataError,
+        match=r"строка 24 \(staff\): color: String should match pattern '\^#\[0-9A-Fa-f\]\{6\}\$'",
+    ):
+        load_reference_data(csv_path)
+
+
+async def test_apply_error_rolls_back_whole_load(db_manager: DBManager, csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: all-or-nothing — an apply-stage failure (an
+    archived location under the same natural key) rolls back EVERYTHING the
+    load wrote in that transaction, not just the failing row."""
+    async with db_manager.async_session() as session:
+        session.add(Location(title="Примерная мастерская", capacity=5, is_active=False))
         await session.commit()
 
-    summary = await _apply(db_manager, services_yaml_dir)
+    data = load_reference_data(csv_path)
+    summary = Summary()
+    async with db_manager.async_session() as session:
+        with pytest.raises(SeedDataError, match="находится в архиве"):
+            await apply_reference_data(session, data, summary)
+        await session.rollback()
 
     async with db_manager.async_session() as session:
-        row = (
-            await session.scalars(select(Service).where(Service.title == "Закулисная услуга"))
+        assert list((await session.scalars(select(Tag))).all()) == []
+        assert list((await session.scalars(select(Material))).all()) == []
+        assert list((await session.scalars(select(Service))).all()) == []
+        assert list((await session.scalars(select(Staff))).all()) == []
+
+
+async def test_re_run_is_idempotent(db_manager: DBManager, csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: a re-run of the same file updates nothing and
+    creates nothing — every bucket reports the row as unchanged."""
+    await _apply(db_manager, csv_path)
+    summary = await _apply(db_manager, csv_path)
+
+    assert summary.stats and all(stats.created == 0 for stats in summary.stats.values())
+    expected_unchanged = {
+        "Теги": 2,
+        "Материалы": 1,
+        "Должности": 2,
+        "Направления": 2,
+        "Локации": 2,
+        "Услуги": 1,
+        "Тарифы": 1,
+        "Сотрудники": 1,
+        "Мастера": 1,
+    }
+    for name, unchanged in expected_unchanged.items():
+        assert summary.bucket(name).unchanged == unchanged, name
+        assert summary.bucket(name).updated == 0, name
+
+
+async def test_missing_builtin_positions_fail_with_alembic_hint(csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: the ``master``/``admin`` position rows are
+    migration-seeded under FIXED ids — a DB without them fails the load with
+    the alembic hint instead of re-creating them under UUID ids."""
+    manager = DBManager("sqlite+aiosqlite:///:memory:")
+    async with manager.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        data = load_reference_data(csv_path)
+        summary = Summary()
+        async with manager.async_session() as session:
+            with pytest.raises(SeedDataError, match="В базе нет системных должностей"):
+                await apply_reference_data(session, data, summary)
+    finally:
+        await manager.engine.dispose()
+
+
+async def test_builtin_positions_keep_fixed_ids(db_manager: DBManager, csv_path: Path) -> None:
+    """Spec §6 №10 / §4.6: the positions section listing the builtin titles
+    matches the migration-seeded rows — no new rows, the string ids stay
+    ``master``/``admin`` (the role template anchors on them)."""
+    summary = await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        rows = {row.id: row.title for row in (await session.scalars(select(Position))).all()}
+    assert rows == {"master": "Мастер", "admin": "Администратор"}
+    assert summary.bucket("Должности").created == 0
+    assert summary.bucket("Должности").unchanged == 2
+
+
+async def test_re_run_syncs_link_sets_exactly_and_warns_for_extra_tariffs(
+    db_manager: DBManager, csv_path: Path
+) -> None:
+    """Spec §6 №10 / §4.6: tag/material/position links are synced as an
+    EXACT set (rows absent from the re-run file are removed), while tariffs
+    are deliberately non-destructive — extra ones stay with a warning."""
+    await _apply(db_manager, csv_path)
+
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace('"Мастер;Администратор"', "Мастер")
+    text = text.replace("\n;Линогравюра для примера;Учебный материал;Для демонстрации связи", "")
+    text = text.replace("\n;Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all", "")
+    csv_path.write_text(text, encoding="utf-8")
+
+    summary = await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        assert list((await session.scalars(select(ServiceMaterial))).all()) == []
+        staff = (await session.scalars(select(Staff))).one()
+        linked_ids = set(
+            (
+                await session.scalars(
+                    select(staff_positions.c.position_id).where(
+                        staff_positions.c.staff_id == staff.id
+                    )
+                )
+            ).all()
+        )
+        titles = {row.id: row.title for row in (await session.scalars(select(Position))).all()}
+        assert {titles[position_id] for position_id in linked_ids} == {"Мастер"}
+        tariff_titles = [row.title for row in (await session.scalars(select(Tariff))).all()]
+    assert tariff_titles == ["Обычный"]
+    assert any("есть тарифы вне файла" in warning for warning in summary.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 №11 (issue #612 Task 4): tag semantics §4.7 — empty tag columns
+# mean «the listed entities' links are cleared», tag entities are only ever
+# added, never deleted.
+# ---------------------------------------------------------------------------
+
+
+async def test_empty_tag_columns_clear_links_and_keep_tag_entities(
+    db_manager: DBManager, csv_path: Path
+) -> None:
+    """Spec §4.7: the owner's real CSV shape — no ``tags`` section, every tag
+    column empty. Run 1 (filled columns) creates the links; run 2 (empty
+    columns, no section) clears them for every listed entity while the Tag
+    row itself survives (tags are add-only at the entity level)."""
+    await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        # «заполненные → связи созданы»
+        assert len(list((await session.scalars(select(location_tags.c.tag_id))).all())) == 1
+        assert len(list((await session.scalars(select(service_tags.c.tag_id))).all())) == 1
+        assert len(list((await session.scalars(select(master_tags.c.tag_id))).all())) == 1
+
+    text = csv_path.read_text(encoding="utf-8")
+    text = text.replace(";0;пример;True", ";0;;True")
+    text = text.replace(";90;;пример", ";90;;")
+    text = text.replace(";#456789;True;пример", ";#456789;True;")
+    text = text.replace("\ntags\n;title\n;пример\n;демонстрация\n\nspecialty", "\nspecialty")
+    csv_path.write_text(text, encoding="utf-8")
+
+    await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        # «сущности-теги не удалены»
+        tags = sorted(row.title for row in (await session.scalars(select(Tag))).all())
+        assert tags == ["демонстрация", "пример"]
+        # «связи перечисленных сущностей очищены» — all three link kinds
+        assert list((await session.scalars(select(location_tags.c.tag_id))).all()) == []
+        assert list((await session.scalars(select(service_tags.c.tag_id))).all()) == []
+        assert list((await session.scalars(select(master_tags.c.tag_id))).all()) == []
+
+
+# ---------------------------------------------------------------------------
+# Spec §6 №12 completion (issue #612 Task 4): services carry no ``is_public``
+# CSV column (spec §4.2 — GH #606 left services visibility admin-side for
+# the loader), so the model default True is the value the file applies.
+# ---------------------------------------------------------------------------
+
+
+async def test_apply_writes_service_is_public_default_true(
+    db_manager: DBManager, csv_path: Path
+) -> None:
+    """A created service row carries the model default True — there is no
+    CSV column to say otherwise."""
+    await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        service = (
+            await session.scalars(
+                select(Service).where(Service.title == "Линогравюра для примера")
+            )
         ).one()
-    assert row.is_public is False
+        assert service.is_public is True
+
+
+async def test_re_run_applies_service_is_public_default_true(
+    db_manager: DBManager, csv_path: Path
+) -> None:
+    """The default is APPLIED, not skipped: a service the admin hid
+    (``is_public=False``) flips back to True on a re-run — the whitelist
+    carries the model default, exactly like the locations column carries
+    the file's polarity."""
+    await _apply(db_manager, csv_path)
+    async with db_manager.async_session() as session:
+        service = (
+            await session.scalars(
+                select(Service).where(Service.title == "Линогравюра для примера")
+            )
+        ).one()
+        service.is_public = False
+        await session.commit()
+
+    summary = await _apply(db_manager, csv_path)
+
+    async with db_manager.async_session() as session:
+        service = (
+            await session.scalars(
+                select(Service).where(Service.title == "Линогравюра для примера")
+            )
+        ).one()
+        assert service.is_public is True
     assert summary.bucket("Услуги").updated == 1
-
-
-def test_shipped_services_yaml_carries_both_polarities_and_check_converges() -> None:
-    """Control: the shipped ``services.yaml`` passes ``--check`` and carries
-    BOTH polarities (spec §3.6: минимум одна ``is_public: false`` — иначе
-    молчаливый пропуск колонки остаётся зелёным)."""
-    data = load_reference_data(DEFAULT_DIR)
-    polarities = {svc.is_public for svc in data.services}
-    assert polarities == {True, False}, (
-        [svc.title for svc in data.services],
-    )
-    assert main(["--check"]) == 0

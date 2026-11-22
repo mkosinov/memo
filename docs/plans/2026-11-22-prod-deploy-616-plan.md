@@ -65,9 +65,9 @@ Build-args несут только публичные значения (пров
 
 ### Dispatch:
 
-1. `.github/workflows/deploy.yml` — триггеры `release: [published]` + `workflow_dispatch` (вход `tag`); job build: чекаут по `github.event.release.tag_name`, buildx 3 образов, push с тегом релиза, префикс реестра из переменной (дефолт `ghcr.io/<владелец репо>`), секреты `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/`DEPLOY_SSH_KEY` (+ `REGISTRY_TOKEN` для приватных образов), минимальные `permissions`; job deploy: `concurrency: prod-deploy` без cancel, GitHub environment `production`, SSH + scp (`deploy.sh`, compose из чекаута релиза) + запуск — @backend-coder — линт схемы workflow зелёный.
-2. `deploy/deploy.sh` — при заданном `REGISTRY_TOKEN` логин в реестр (read:packages), pull по тегу, `docker compose run --rm backend alembic upgrade head`, `up -d`, ожидание health python-циклом с таймаутом, внятные коды выхода (провал healthcheck ≠ провал миграций) — @backend-coder — shellcheck чистый.
-3. `test.yml`: новый job сборки 3 образов **без push + запуск** (backend health `/api/v1/health`, admin `/admin`, web `/`) — @backend-coder — job зелёный на PR этой ветки.
+1. `.github/workflows/deploy.yml` — триггеры `release: [published]` + `workflow_dispatch` (вход `tag`); job build: чекаут по `github.event.release.tag_name`, buildx 3 образов, push с тегом релиза, префикс реестра из переменной (дефолт `ghcr.io/<владелец репо>`; репо публичный → пакет публичен, токен не нужен; `REGISTRY_TOKEN` — только если пакет переведён в private), секреты `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/`DEPLOY_SSH_KEY` + секреты приложения для рендера env (`SECRET_KEY`, `OTP_PEPPER`, транспорты — §3.3 спеки), минимальные `permissions`; job deploy: `concurrency: prod-deploy` без cancel, GitHub environment `production`, SSH + scp (`deploy.sh` + `render-env.sh` + compose из чекаута релиза) + запуск — @backend-coder — линт схемы workflow зелёный.
+2. `deploy/deploy.sh` + `deploy/render-env.sh` — рендер env-файла из переменных джоба (атомарно, 0600, значения не печатаются; тот же скрипт используют CI-смоук и `prod-smoke.sh`), при заданном `REGISTRY_TOKEN` логин в реестр (read:packages), pull по тегу, `docker compose run --rm backend alembic upgrade head`, `up -d`, ожидание health python-циклом с таймаутом, внятные коды выхода (провал healthcheck ≠ провал миграций) — @backend-coder — shellcheck чистый.
+3. `test.yml`: новый job сборки 3 образов **без push + запуск** (backend health `/api/v1/health`, admin `/admin`, web `/`); тестовый env — литералы-пустышки через `render-env.sh` в канонический путь `/opt/memo/env/production.env` (runner — root, каталог создаётся джобой; замена упавшей подмены оверрайдом: `env_file` базового compose при склейке не переписывается — путь остаётся каноническим, файл создаёт рендер) — @backend-coder — job зелёный на PR этой ветки.
 
 ### Required Docs
 
@@ -95,7 +95,7 @@ gh CLI: (1) все issues milestone закрыты — иначе стоп (фо
 
 ### Classification: small
 
-Чистый временный каталог с томами → тестовый env-файл (пути `/opt/memo/...` на imac не существуют — смоук подменяет их compose-оверрайдом) → миграции → `up -d` → ожидание health → 401 анониму на API → оболочка `/admin` отдаётся → ассерт наличия `-wal`/`-shm` на томе (критерий закрепления WAL-прагм Задачи 1) → teardown. Два режима сверх базового: повторный прогон с предыдущим тегом (сценарий 2 — откат); env без `SECRET_KEY`/`OTP_PEPPER` → контейнер отказывается стартовать (сценарий 4, уровень образа).
+Чистый временный каталог с томами → тестовый env рендерится `render-env.sh` в канонический путь `/opt/memo/env/production.env` (на imac — одноразовый `sudo mkdir -p /opt/memo/env`) → миграции → `up -d` → ожидание health → 401 анониму на API → оболочка `/admin` отдаётся → ассерт наличия `-wal`/`-shm` на томе (критерий закрепления WAL-прагм Задачи 1) → teardown. Два режима сверх базового: повторный прогон с предыдущим тегом (сценарий 2 — откат); env без `SECRET_KEY`/`OTP_PEPPER` → контейнер отказывается стартовать (сценарий 4, уровень образа).
 
 ### Required Docs
 

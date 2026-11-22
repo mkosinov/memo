@@ -14,7 +14,7 @@
 #
 # Staging note: deploy.sh preflight-checks the absolute VPS paths
 # /opt/memo/env/production.env (fixture created by earlier #616 tasks) and
-# /opt/memo/{data,files}. This test creates the two volume dirs when absent
+# /opt/memo/{data,media}. This test creates the two volume dirs when absent
 # and removes ONLY what it created.
 #
 # Run: bash deploy/deploy.sh.dryrun.test.sh
@@ -37,15 +37,15 @@ if [ ! -f /opt/memo/env/production.env ]; then
   echo "SKIP: /opt/memo/env/production.env fixture missing (earlier #616 task creates it)." >&2
   exit 0
 fi
-created_data=0 created_files=0
+created_data=0 created_media=0
 if [ ! -d /opt/memo/data ]; then mkdir -p /opt/memo/data; created_data=1; fi
-if [ ! -d /opt/memo/files ]; then mkdir -p /opt/memo/files; created_files=1; fi
+if [ ! -d /opt/memo/media ]; then mkdir -p /opt/memo/media; created_media=1; fi
 
 cleanup() {
   rm -rf "$WORK"
   # Restore the moved-aside fixture dir first (case 9 dies mid-run).
-  if [ -d /opt/memo/files.dryrun-held ]; then mv /opt/memo/files.dryrun-held /opt/memo/files; fi
-  if [ "$created_files" = 1 ] && [ -d /opt/memo/files ]; then rm -rf /opt/memo/files; fi
+  if [ -d /opt/memo/media.dryrun-held ]; then mv /opt/memo/media.dryrun-held /opt/memo/media; fi
+  if [ "$created_media" = 1 ] && [ -d /opt/memo/media ]; then rm -rf /opt/memo/media; fi
   if [ "$created_data" = 1 ] && [ -d /opt/memo/data ]; then rm -rf /opt/memo/data; fi
 }
 trap cleanup EXIT
@@ -161,10 +161,10 @@ assert_rc 0
 j_has '^LOGIN host=ghcr.io user=mkosinov token=dryrun-token-xyz$'
 j_has '^PULL ghcr.io/mkosinov/memo/backend:v9.9.9$'
 j_has '^PULL ghcr.io/mkosinov/memo/admin:v9.9.9$'
-j_has '^PULL ghcr.io/mkosinov/memo/web:v9.9.9$'
+j_has '^PULL ghcr.io/mkosinov/memo/edge:v9.9.9$'
 j_has '^COMPOSE f=docker-compose.prod.yml tag=v9.9.9 run --rm -T backend alembic upgrade head$'
 j_has '^COMPOSE f=docker-compose.prod.yml tag=v9.9.9 up -d$'
-j_has '^PY -c .*urlopen.*127.0.0.1:8000/api/v1/health'
+j_has '^PY -c .*urlopen.*127.0.0.1/api/v1/health'
 j_has '^LOGOUT ghcr.io$'
 assert_before '^LOGIN ' '^PULL '
 assert_before '^PULL ' 'run --rm -T'
@@ -172,8 +172,12 @@ assert_before 'run --rm -T' 'up -d$'
 assert_before 'up -d$' '^PY '
 if grep -q 'dryrun-token-xyz' "$OUT"; then bad 'REGISTRY_TOKEN leaked into script output'
 else ok 'token never echoed'; fi
-if grep -q 'WARNING.*uid 1001' "$OUT"; then ok 'uid-1001 ownership warning fired (root-owned staging dirs)'
-else bad 'expected uid-1001 warning for root-owned dirs'; fi
+# Ownership warnings must cover BOTH volume dirs (root-owned staging): data
+# (SQLite WAL) and media (backend avatar writes at the volume root).
+out_has '/opt/memo/data is not owned by uid 1001'
+out_has '/opt/memo/media is not owned by uid 1001'
+if grep -q '/opt/memo/files' "$OUT"; then bad 'stale /opt/memo/files reference in deploy.sh output'
+else ok 'no stale /opt/memo/files references in output'; fi
 unset REGISTRY_TOKEN STUB_HEALTH_RC
 
 # ── case 2: public images (no token), unrelated cwd ───────────────────────
@@ -240,12 +244,12 @@ assert_rc 1
 out_has 'usage: ./deploy.sh'
 
 # ── case 9: preflight — missing volume dir → exit 1 ────────────────────────
-echo '== case 9: missing /opt/memo/files → exit 1 (preflight) =='
-mv /opt/memo/files /opt/memo/files.dryrun-held
+echo '== case 9: missing /opt/memo/media → exit 1 (preflight) =='
+mv /opt/memo/media /opt/memo/media.dryrun-held
 run_deploy "$WORK/tree/deploy" v9.9.9
 assert_rc 1
-out_has '/opt/memo/files'
-mv /opt/memo/files.dryrun-held /opt/memo/files
+out_has '/opt/memo/media'
+mv /opt/memo/media.dryrun-held /opt/memo/media
 
 # ── case 10: compose up -d failure → exit 5 ────────────────────────────────
 echo '== case 10: up -d fails → exit 5 =='

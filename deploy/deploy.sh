@@ -4,10 +4,11 @@
 # =============================================================================
 #
 # Invoked by the release workflow (.github/workflows/deploy.yml, job
-# `deploy`), which scp's deploy.sh + docker-compose.prod.yml to
-# /opt/memo/deploy/ and runs `./deploy.sh <release-tag>`. May also be run
-# manually on the VPS — that is the rollback path (spec §4.3): a CONSCIOUS
-# re-run with the PREVIOUS release tag; there is no auto-rollback by design.
+# `deploy`), which scp's deploy.sh + render-env.sh + docker-compose.prod.yml
+# to /opt/memo/deploy/, renders the env file (see the note below) and runs
+# `./deploy.sh <release-tag>`. May also be run manually on the VPS — that
+# is the rollback path (spec §4.3): a CONSCIOUS re-run with the PREVIOUS
+# release tag; there is no auto-rollback by design.
 #
 # Usage (cwd does not matter — the script cds next to itself, where the
 # compose file lives):
@@ -27,10 +28,17 @@
 #                          the compose/workflow defaults.
 #   HEALTH_TIMEOUT_SECONDS health-wait budget, default 120.
 #
+# Env file note: /opt/memo/env/production.env is rendered by render-env.sh
+# (scp'ed into the same dir by the workflow) BEFORE this script runs —
+# values arrive on render-env.sh's STDIN and never appear in argv. This
+# script never writes the env file; the preflight below only verifies the
+# file exists.
+#
 # Operator pre-reqs (deploy/Dockerfile.backend header, runbook #619):
-#   /opt/memo/env/production.env, /opt/memo/data, /opt/memo/files exist;
-#   the two volume dirs chowned 1001:1001 (SQLite WAL + avatar writes run
-#   as uid 1001 — root-owned mount points die as EACCES).
+#   /opt/memo/env/production.env, /opt/memo/data, /opt/memo/media exist;
+#   the two volume dirs chowned 1001:1001 (SQLite WAL in data/; avatar
+#   writes at the media volume ROOT — root-owned mount points die as
+#   EACCES).
 #
 # Exit codes (single canon — a health failure is NOT a migration failure):
 #   0  success — stack up + /api/v1/health answered 2xx
@@ -92,19 +100,25 @@ esac
 export MEMO_IMAGE_TAG="$tag"
 export MEMO_REGISTRY_PREFIX="$REGISTRY_PREFIX"
 
-HEALTH_URL=http://127.0.0.1:8000/api/v1/health
+# Through edge — the only service publishing host ports (80): the wait
+# then covers the whole nginx → backend → DB chain. Port 80 serves this
+# exact path to loopback ONLY (exact-match location with allow 127.0.0.1
+# in deploy/nginx.conf; GH #616).
+HEALTH_URL=http://127.0.0.1/api/v1/health
 HEALTH_TIMEOUT_SECONDS=${HEALTH_TIMEOUT_SECONDS:-120}
 
 # ── preflight: operator pre-reqs ───────────────────────────────────────────
 command -v python3 >/dev/null 2>&1 \
   || die 1 "python3 not found on the host — the health probe needs it (no curl in the images)"
-for path in /opt/memo/env/production.env /opt/memo/data /opt/memo/files; do
+for path in /opt/memo/env/production.env /opt/memo/data /opt/memo/media; do
   [ -e "$path" ] || die 1 "missing $path — operator pre-req (deploy/Dockerfile.backend header, runbook #619)"
 done
 # uid-1001 ownership is a WARNING, not an error: a remapped-uid setup
 # (Dockerfile.backend header) is legitimate; a forgotten chown on a stock
 # setup would otherwise surface as a cryptic health timeout (exit 3).
-for dir in /opt/memo/data /opt/memo/files; do
+# media included: the backend writes avatars/ at the media volume ROOT
+# (single media volume, spec §3.2 rev.6) — same uid-1001 failure mode.
+for dir in /opt/memo/data /opt/memo/media; do
   if [ "$(stat -c %u "$dir")" != 1001 ]; then
     printf 'deploy.sh: WARNING: %s is not owned by uid 1001 — unless this is a remapped-uid setup, run: chown 1001:1001 %s\n' \
       "$dir" "$dir" >&2
@@ -125,7 +139,7 @@ if [ -n "${REGISTRY_TOKEN:-}" ]; then
 fi
 
 # ── pull the 3 tagged images BEFORE touching the DB (fail fast, exit 4) ────
-for image in backend admin web; do
+for image in backend admin edge; do
   log "docker pull ${REGISTRY_PREFIX}/${image}:${tag}"
   docker pull "${REGISTRY_PREFIX}/${image}:${tag}" \
     || die 4 "docker pull ${REGISTRY_PREFIX}/${image}:${tag} failed"
@@ -150,7 +164,7 @@ if ! compose up -d; then
   die 5 "docker compose up -d failed"
 fi
 
-# ── health wait: python loop against the loopback-published port ───────────
+# ── health wait: python loop through edge's host-published port 80 ──────────
 log "waiting for $HEALTH_URL (up to ${HEALTH_TIMEOUT_SECONDS}s)"
 # The images ship python but no curl (spec §3.2); urlopen raises on non-2xx
 # and on timeout → non-zero exit → retry until the deadline.

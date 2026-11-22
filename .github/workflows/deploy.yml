@@ -8,9 +8,11 @@
 #            event sha is unreliable), build the 3 prod images with buildx +
 #            GHA layer cache, push them tagged with the release tag.
 #   deploy — queue on `prod-deploy` (parallel rollouts forbidden — one SQLite
-#            writer), scp deploy.sh + docker-compose.prod.yml FROM THE RELEASE
-#            CHECKOUT (the deploy script always matches the deployed version)
-#            and run deploy.sh on the VPS.
+#            writer), scp deploy.sh + render-env.sh + docker-compose.prod.yml
+#            FROM THE RELEASE CHECKOUT (the deploy files always match the
+#            deployed version), render /opt/memo/env/production.env from
+#            GitHub Secrets (render-env.sh, payload over ssh stdin — never
+#            argv) and run deploy.sh on the VPS.
 #
 # Registry namespace: `vars.REGISTRY_PREFIX` repo variable, default
 # `ghcr.io/<owner>/<repo>` lowercased. The default MUST stay byte-equal to the
@@ -20,11 +22,15 @@
 # uppercase paths — the repo path is already lowercase, the tr keeps the
 # workflow robust.
 #
-# Secrets (spec §3.3 — deploy access ONLY, app secrets never enter GitHub):
-# environment `production` holds DEPLOY_SSH_HOST / DEPLOY_SSH_USER /
-# DEPLOY_SSH_KEY (VPS access) and REGISTRY_TOKEN (read:packages PAT, needed
-# only when the images are private; deploy.sh skips registry login when it is
-# empty). GITHUB_TOKEN (packages: write) pushes the images in `build`.
+# Secrets (spec §3.3 rev.6): environment `production` gates the deploy trio
+# DEPLOY_SSH_HOST / DEPLOY_SSH_USER / DEPLOY_SSH_KEY (VPS access) and
+# REGISTRY_TOKEN (read:packages PAT, needed only when the images are
+# private; deploy.sh skips registry login when it is empty). App secrets are
+# REPO secrets named exactly like their env keys (SECRET_KEY, OTP_PEPPER, …
+# — see the `render prod env` step): the deploy job forwards them to
+# render-env.sh over ssh stdin — never argv, never disk on the runner —
+# which renders /opt/memo/env/production.env on the VPS (atomic, 0600).
+# GITHUB_TOKEN (packages: write) pushes the images in `build`.
 
 name: Deploy
 
@@ -109,9 +115,10 @@ jobs:
 
       # Build args are baked into the Dockerfiles (public values only, spec
       # §3.3) — the workflow passes none. Contexts: backend image builds from
-      # backend/; admin/web need the repo root (pnpm workspace: packages/ +
-      # root lockfile). Per-image GHA cache scopes keep the three builds from
-      # evicting each other's cache entries.
+      # backend/; admin/edge need the repo root (pnpm workspace: packages/ +
+      # root lockfile; edge serves the web SPA statics + nginx). Per-image
+      # GHA cache scopes keep the three builds from evicting each other's
+      # cache entries.
       - name: Build & push backend image
         uses: docker/build-push-action@v6
         with:
@@ -132,15 +139,15 @@ jobs:
           cache-from: type=gha,scope=memo-admin
           cache-to: type=gha,mode=max,scope=memo-admin
 
-      - name: Build & push web image
+      - name: Build & push edge image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: deploy/Dockerfile.web
+          file: deploy/Dockerfile.edge
           push: true
-          tags: ${{ steps.registry.outputs.prefix }}/web:${{ steps.tag.outputs.tag }}
-          cache-from: type=gha,scope=memo-web
-          cache-to: type=gha,mode=max,scope=memo-web
+          tags: ${{ steps.registry.outputs.prefix }}/edge:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=memo-edge
+          cache-to: type=gha,mode=max,scope=memo-edge
 
     outputs:
       # Plain strings: job outputs accept no description metadata.
@@ -169,6 +176,21 @@ jobs:
       REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
       DEPLOY_TAG: ${{ needs.build.outputs.tag }}
       MEMO_REGISTRY_PREFIX: ${{ needs.build.outputs.registry-prefix }}
+      # App secrets (spec §3.3 rev.6): repo secrets named EXACTLY like the
+      # env keys — the `render prod env` step forwards them to render-env.sh
+      # on the VPS. Empty secrets are OMITTED from the payload there: an
+      # empty `KEY=` line would override the app default with empty.
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      OTP_PEPPER: ${{ secrets.OTP_PEPPER }}
+      BUSINESS_TIMEZONE: ${{ secrets.BUSINESS_TIMEZONE }}
+      LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+      OTP_TRANSPORT: ${{ secrets.OTP_TRANSPORT }}
+      CALLCHECK_TRANSPORT: ${{ secrets.CALLCHECK_TRANSPORT }}
+      SMSRU_CALLCHECK_API_KEY: ${{ secrets.SMSRU_CALLCHECK_API_KEY }}
+      NOTIFICATION_ENABLED: ${{ secrets.NOTIFICATION_ENABLED }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
     steps:
       # Spec §4.2: scp the deploy files FROM THE RELEASE CHECKOUT — deploy.sh
@@ -190,13 +212,61 @@ jobs:
           ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
             "$SSH_USER@$SSH_HOST" "mkdir -p /opt/memo/deploy"
           scp -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
-            deploy/deploy.sh deploy/docker-compose.prod.yml \
+            deploy/deploy.sh deploy/render-env.sh deploy/docker-compose.prod.yml \
             "$SSH_USER@$SSH_HOST:/opt/memo/deploy/"
+
+      # ── render prod env (spec §3.3 rev.6) ─────────────────────────────────
+      #
+      # Builds the env-file payload in a bash variable and pipes it over ssh
+      # stdin into render-env.sh (scp'ed above), which renders
+      # /opt/memo/env/production.env on the VPS atomically (0600). Secret
+      # values NEVER appear in the remote command string (ssh argv is
+      # visible in `ps` on the VPS) — stdin only — and the payload never
+      # touches disk on the runner: a bash variable, NOT $GITHUB_ENV /
+      # $GITHUB_OUTPUT (both persist to disk). Each workflow step is a
+      # fresh shell, so the payload is built and piped in THIS step, before
+      # the deploy invocation below.
+      #
+      # Silent by design: no set -x, no echo of the payload. GitHub also
+      # auto-masks secret-derived values in logs — the step does not rely
+      # on that, it simply prints nothing.
+      #
+      # emit KEY VALUE — append "KEY=VALUE" only when VALUE is non-empty:
+      # render-env passes values through verbatim, and an empty repo secret
+      # must NOT become `KEY=` (it would override the app default with
+      # empty). Values are written raw via printf '%s=%s\n' — no quoting.
+      # The fixed literals are always present.
+      - name: render prod env
+        run: |
+          emit() {
+            if [ -n "$2" ]; then printf '%s=%s\n' "$1" "$2"; fi
+          }
+          ENV_PAYLOAD="$(
+            printf '%s=%s\n' 'ENV' 'production'
+            printf '%s=%s\n' 'DATABASE_URL' 'sqlite+aiosqlite:////opt/memo/data/memo.db'
+            printf '%s=%s\n' 'FILES_DIR' '/opt/memo/media'
+            emit SECRET_KEY "${SECRET_KEY}"
+            emit OTP_PEPPER "${OTP_PEPPER}"
+            emit BUSINESS_TIMEZONE "${BUSINESS_TIMEZONE}"
+            emit LOG_LEVEL "${LOG_LEVEL}"
+            emit OTP_TRANSPORT "${OTP_TRANSPORT}"
+            emit CALLCHECK_TRANSPORT "${CALLCHECK_TRANSPORT}"
+            emit SMSRU_CALLCHECK_API_KEY "${SMSRU_CALLCHECK_API_KEY}"
+            emit NOTIFICATION_ENABLED "${NOTIFICATION_ENABLED}"
+            emit REDIS_URL "${REDIS_URL}"
+            emit TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN}"
+            emit TELEGRAM_CHAT_ID "${TELEGRAM_CHAT_ID}"
+          )"
+          printf '%s' "$ENV_PAYLOAD" | ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "cd /opt/memo/deploy && chmod +x deploy.sh render-env.sh && ./render-env.sh"
 
       # ── deploy.sh interface (GH #616 subtask 2 — implement EXACTLY) ─────
       #
       # Remote layout (scp'ed from the release checkout):
       #   /opt/memo/deploy/deploy.sh
+      #   /opt/memo/deploy/render-env.sh          (rendered the env file in
+      #     the `render prod env` step above — BEFORE deploy.sh runs)
       #   /opt/memo/deploy/docker-compose.prod.yml   (same directory —
       #     deploy.sh runs docker compose next to itself)
       #
@@ -213,11 +283,13 @@ jobs:
       #                         PRIVATE images; empty → no login. deploy.sh
       #                         must never echo it.
       #
-      # deploy.sh must (spec §4.2): pull the 3 tagged images, run
-      # `docker compose run --rm backend alembic upgrade head` BEFORE `up -d`,
-      # then wait for /api/v1/health in a loop (python one-liner — no curl in
-      # the image). Any failure → non-zero exit → this job goes red; the
-      # rollback path is a conscious re-dispatch with the previous tag (§4.3).
+      # deploy.sh must (spec §4.2): pull the 3 tagged images (backend,
+      # admin, edge), run `docker compose run --rm backend alembic upgrade
+      # head` BEFORE `up -d`, then wait for http://127.0.0.1/api/v1/health
+      # through edge :80 in a loop (python one-liner on the host — no curl
+      # assumed). Any failure → non-zero exit → this job goes red; the
+      # rollback path is a conscious re-dispatch with the previous tag
+      # (§4.3).
       - name: Run deploy.sh on the VPS
         run: |
           ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \

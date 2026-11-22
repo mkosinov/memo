@@ -58,12 +58,19 @@
 #
 # SAFETY GUARD — pre-existing canonical env file: prod-smoke must NEVER
 # clobber a real /opt/memo/env/production.env silently. If the target
-# exists before the run it is moved away to $SMOKE_DIR/env.production.env.bak
-# (mv preserves mode and content — e.g. the 0600 root:root contract) and
-# RESTORED byte-exact in teardown. A failed backup aborts the run BEFORE
-# anything is rendered. When NO file pre-existed, teardown REMOVES the
-# canonical dummy (best effort, sudo fallback) — the machine is left as
-# found either way.
+# exists before the run it is moved away to
+# /opt/memo/env/production.env.pre-smoke.bak — BESIDE the target, never
+# inside the disposable SMOKE_DIR: a crash between the backup and the
+# teardown restore must not orphan the real env in a temp dir (the NEXT
+# run would then find no target, render dummies and silently leave the
+# machine without its production env). Same directory = same filesystem,
+# mv preserves mode and content (e.g. the 0600 root:root contract);
+# teardown restores it byte-exact. A failed backup aborts the run BEFORE
+# anything is rendered, and a STALE .bak found at startup (a previous run
+# crashed before restoring it) aborts too — the operator restores by
+# hand; data we cannot account for is never overwritten. When NO file
+# pre-existed, teardown REMOVES the canonical dummy (best effort, sudo
+# fallback) — the machine is left as found either way.
 #
 # Usage:
 #   scripts/prod-smoke.sh                # default: spec §7 scenario 3 —
@@ -329,7 +336,8 @@ printf '%s' "$NEG_SENTINEL" > "$SMOKE_DIR/media/private/x.txt"
 # ── canonical env: privilege + backup guard + render (render-env.sh) ────────
 ENV_DIR=/opt/memo/env
 ENV_TARGET=$ENV_DIR/production.env
-ENV_BACKUP=''  # set when a pre-existing canonical file was moved away
+ENV_BACKUP=$ENV_DIR/production.env.pre-smoke.bak # BESIDE the target (SAFETY GUARD in the header)
+ENV_MOVED=0    # 1 once THIS run moved the real env into the backup slot
 ENV_RENDERED=0 # 1 once THIS run rendered the canonical dummy
 ENV_PRIV=''    # '' = current user writes; 'sudo -n' = privileged writes
 
@@ -351,11 +359,22 @@ then either hand it over (sudo chown \$(id -un) $ENV_DIR) or keep sudo -n passwo
 }
 
 env_backup_if_present() { # SAFETY GUARD: never clobber a real canonical file
+  # A stale backup BESIDE the target means an earlier run died between its
+  # own backup and restore — the real env is sitting in the .bak while the
+  # canonical path is missing (or holds leftovers). That state cannot be
+  # reconciled automatically: ABORT and let the operator restore by hand.
+  # Never overwrite data we cannot account for.
+  if [ -f "$ENV_BACKUP" ]; then
+    die 1 "env guard: stale backup $ENV_BACKUP — a previous run crashed before restoring it.
+Restore it manually (drop the leading sudo when /opt/memo/env is yours):
+  sudo mv -f $ENV_BACKUP $ENV_TARGET
+then re-run the smoke."
+  fi
   if [ -f "$ENV_TARGET" ]; then
-    ENV_BACKUP=$SMOKE_DIR/env.production.env.bak
     log "env guard: pre-existing $ENV_TARGET — backing up to $ENV_BACKUP (restored at teardown)"
     env_do mv -f -- "$ENV_TARGET" "$ENV_BACKUP" \
       || die 1 "env guard: backing up the pre-existing $ENV_TARGET failed — aborting BEFORE touching it"
+    ENV_MOVED=1
     [ -f "$ENV_BACKUP" ] \
       || die 1 "env guard: backup verification failed ($ENV_BACKUP missing after mv)"
   fi
@@ -383,7 +402,8 @@ render_env() { # render_env <with-secrets:1|0> — dummy env → canonical path
 # ── teardown: ALWAYS (trap), zero leftovers (DoD) ───────────────────────────
 STACK_UP=0
 COMPOSE_TOUCHED=0
-# shellcheck disable=SC2317  # invoked only via the EXIT trap below
+# shellcheck disable=SC2317,SC2329  # TEARDOWN runs only via the EXIT trap;
+# ^ SC2317 (shellcheck <0.11) / SC2329 (>=0.11: "not invoked") — same nit.
 TEARDOWN() {
   local rc=$?
   trap - EXIT
@@ -410,7 +430,7 @@ TEARDOWN() {
   # Canonical env — BEFORE the temp dir goes away (the backup lives there):
   # restore the pre-existing file (SAFETY GUARD above), or remove the dummy
   # this run rendered (machine left as found; best effort by design).
-  if [ -n "$ENV_BACKUP" ] && [ -f "$ENV_BACKUP" ]; then
+  if [ "$ENV_MOVED" = 1 ] && [ -f "$ENV_BACKUP" ]; then
     if env_do mv -f -- "$ENV_BACKUP" "$ENV_TARGET"; then
       log "env guard: pre-existing $ENV_TARGET restored (mv — byte-exact, mode preserved)"
     else

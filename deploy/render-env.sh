@@ -28,9 +28,13 @@
 # Input contract: one variable per line, `KEY=VALUE`. Empty lines and lines
 # starting with '#' are skipped. Any other line that does not match
 # ^[A-Za-z_][A-Za-z0-9_]*= aborts the render BEFORE the target is touched
-# (exit 2). Values may contain any bytes except newline and are passed
-# through VERBATIM — no quoting added, no interpretation; callers compose
-# shell-safe literals.
+# (exit 2). A trailing carriage return is stripped from each line (CRLF-
+# tolerant: an env file saved with Windows line endings renders as if LF).
+# A render that consumes ZERO KEY=VALUE lines (empty or comments-only
+# stdin) is refused the same way — the target must never be truncated by
+# an empty render. Values may contain any bytes except newline and are
+# passed through VERBATIM — no quoting added, no interpretation; callers
+# compose shell-safe literals.
 #
 # Secrecy: values are never written to stdout/stderr (no `set -x`, no echo
 # of the input); error messages name the LINE NUMBER and KEY only. A line
@@ -45,7 +49,8 @@
 # Exit codes:
 #   0  success — target rendered atomically
 #   1  usage error (bad arguments) or preflight/write failure
-#   2  malformed input line on stdin
+#   2  malformed input line on stdin, or zero KEY=VALUE lines consumed
+#      (empty/comments-only stdin — the target is never truncated)
 set -euo pipefail
 
 readonly DEFAULT_OUTPUT=/opt/memo/env/production.env
@@ -113,6 +118,7 @@ count=0
 lineno=0
 while IFS= read -r line || [ -n "$line" ]; do
   lineno=$((lineno + 1))
+  line=${line%$'\r'} # CRLF tolerance: strip one trailing carriage return
   # Empty lines and '#' comments are skipped.
   if [ -z "$line" ] || [[ $line == '#'* ]]; then
     continue
@@ -123,14 +129,22 @@ while IFS= read -r line || [ -n "$line" ]; do
       printf 'render-env.sh: stdin line %d: malformed KEY=VALUE line (key: %s)\n' \
         "$lineno" "${line%%=*}" >&2
     else
-      printf 'render-env.sh: stdin line %d: malformed KEY=VALUE line (no KEY= prefix)\n' \
-        "$lineno" >&2
+      printf 'render-env.sh: stdin line %d: malformed KEY=VALUE line (no KEY= prefix)\n' "$lineno" >&2
     fi
     exit 2
   fi
   printf '%s\n' "$line" >> "$tmp"
   count=$((count + 1))
 done
+
+# Zero consumed lines = empty or comments-only stdin: refuse BEFORE the
+# target is touched (tmp is removed by the trap) — an empty render would
+# truncate the canonical env file to nothing.
+if [ "$count" -eq 0 ]; then
+  printf 'render-env.sh: no KEY=VALUE lines consumed from stdin — refusing to truncate %s with an empty render\n' \
+    "$output" >&2
+  exit 2
+fi
 
 chmod 0600 -- "$tmp"
 mv -f -- "$tmp" "$output"

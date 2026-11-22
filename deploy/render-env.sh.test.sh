@@ -13,6 +13,9 @@
 #   - atomicity: a pre-existing target is replaced via rename (fresh 0600
 #     perms, old content gone), directory listing unchanged afterwards
 #   - --output override (nested directories created)
+#   - CRLF input: trailing \r stripped from each line (value bytes clean)
+#   - empty render refused: empty or comments-only stdin → exit 2, the
+#     pre-existing target NOT touched (no truncation), no temp leftovers
 #   - usage canon: 0 ok+help / 1 usage / 2 malformed input
 #
 # Canonical-path cases write /opt/memo/env/production.env and NEED ROOT
@@ -157,6 +160,37 @@ run_render "$WORK/in1.env" --output "$WORK/custom/dir/custom.env"
 assert_rc 0
 cmp_ok "$WORK/in1.env" "$WORK/custom/dir/custom.env"
 mode_ok "$WORK/custom/dir/custom.env" 600
+
+# ── case 7: CRLF input — trailing \r stripped from every line ───────────────
+echo '== case 7: CRLF input (trailing CR stripped) =='
+printf 'KEY_CRLF=value-clean\r\nOTHER_PLAIN=x\nEMPTY_CRLF=\r\n' > "$WORK/in7.env"
+run_render "$WORK/in7.env" --output "$WORK/out7.env"
+assert_rc 0
+printf 'KEY_CRLF=value-clean\nOTHER_PLAIN=x\nEMPTY_CRLF=\n' > "$WORK/want7.env"
+cmp_ok "$WORK/want7.env" "$WORK/out7.env"
+mode_ok "$WORK/out7.env" 600
+
+# ── case 8: empty render refused — exit 2, target NOT touched ───────────────
+echo '== case 8: empty render refused (empty and comments-only stdin) =='
+printf 'PRECIOUS=do-not-truncate-me\nSECOND=also-precious\n' > "$WORK/want8.env"
+cp "$WORK/want8.env" "$WORK/out8.env"
+chmod 0600 "$WORK/out8.env"
+: > "$WORK/in8.env" # zero bytes
+run_render "$WORK/in8.env" --output "$WORK/out8.env"
+assert_rc 2
+out_has 'no KEY=VALUE lines'
+out_has 'refusing to truncate'
+cmp_ok "$WORK/want8.env" "$WORK/out8.env" # pre-existing content intact
+mode_ok "$WORK/out8.env" 600
+no_temp "$WORK"
+
+printf '# only a comment, no variables\n\n' > "$WORK/in8b.env"
+cp "$WORK/want8.env" "$WORK/out8b.env"
+run_render "$WORK/in8b.env" --output "$WORK/out8b.env"
+assert_rc 2
+out_has 'no KEY=VALUE lines'
+cmp_ok "$WORK/want8.env" "$WORK/out8b.env"
+no_temp "$WORK"
 
 # ── case 6: usage canon (0 help / 1 bad args) ──────────────────────────────
 echo '== case 6: usage canon =='

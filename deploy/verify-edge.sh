@@ -37,7 +37,8 @@ CERTDIR=""
 cleanup() {
     local c
     for c in "$PROD_C" "$SMOKE_C" "$SERVE_C"; do
-        [ -n "$c" ] && docker rm -f "$c" >/dev/null 2>&1 || true
+        # best-effort cleanup: skip empty names, ignore rm failures
+        if [ -n "$c" ]; then docker rm -f "$c" >/dev/null 2>&1 || true; fi
     done
     [ -n "$CERTDIR" ] && rm -rf "$CERTDIR"
 }

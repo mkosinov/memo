@@ -9,7 +9,16 @@
 #     single-process by design);
 #   - --forwarded-allow-ips is a TRUST BOUNDARY: only the address nginx/gateway
 #     connects from. Default = compose-network gateway (172.16.0.1, pinned by
-#     deploy/docker-compose.prod.yml); override via build ARG or env, NEVER '*'.
+#     deploy/docker-compose.prod.yml); override via build ARG or compose
+#     environment, NEVER '*'.
+#   - runs as non-root: fixed uid/gid 1001 (`memo`), created before the first
+#     COPY so every /app layer is memo-owned (--chown; no rewriting chown
+#     layer). HOST-SIDE OWNERSHIP CONTRACT: /opt/memo/data and /opt/memo/files
+#     are host bind mounts, so the operator must
+#       chown 1001:1001 /opt/memo/data /opt/memo/files
+#     on the VPS (or remap the image UID to match the host owner) — SQLite
+#     WAL/-shm creation and avatar writes run as uid 1001 and fail with EACCES
+#     on root-owned mount points.
 #   - no curl / no HEALTHCHECK here: healthcheck lives in compose (python one-liner);
 #   - alembic ships in the image: migrations run as an explicit step
 #     (`docker compose run --rm backend alembic upgrade head`), not as entrypoint.
@@ -21,25 +30,39 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+# Fixed uid/gid (not name-auto-assigned): the host ownership contract above
+# keys on the number 1001. nologin shell — the login shell is never used
+# (CMD/compose-run/healthcheck exec binaries directly).
+RUN useradd --uid 1001 --user-group --create-home --shell /usr/sbin/nologin memo \
+    && chown memo:memo /app
+
+# Everything below — deps install AND runtime — runs as memo; nothing in this
+# image executes as root (COPY always lands files as root:root, hence --chown).
+USER memo
+
 # Deps layer (cached unless pyproject/uv.lock change).
-COPY pyproject.toml uv.lock ./
+COPY --chown=memo:memo pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # App + migrations + runtime reference data (src/seed reads <repo>/seed-data).
-COPY src ./src
-COPY alembic ./alembic
-COPY alembic.ini ./
-COPY seed-data ./seed-data
+COPY --chown=memo:memo src ./src
+COPY --chown=memo:memo alembic ./alembic
+COPY --chown=memo:memo alembic.ini ./
+COPY --chown=memo:memo seed-data ./seed-data
 RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Compose-network gateway by default (see header); env-overridable at runtime.
-ARG FORWARDED_ALLOW_IP=172.16.0.1
-ENV FORWARDED_ALLOW_IP=${FORWARDED_ALLOW_IP}
+# Compose-network gateway by default (see header); compose pins it explicitly.
+# Uvicorn-native plural name; the env var only feeds the CLI flag below —
+# uvicorn never reads it directly, because the flag is always present.
+ARG FORWARDED_ALLOW_IPS=172.16.0.1
+ENV FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS}
 
 EXPOSE 8000
 
 # `exec` replaces the shell so uvicorn is PID 1 and receives SIGTERM directly
-# (graceful stop → WAL flush within compose stop_grace_period).
-CMD exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IP"
+# (graceful stop → WAL flush within compose stop_grace_period). The explicit
+# --forwarded-allow-ips flag ALWAYS wins over uvicorn's native env var of the
+# same name — operators must not try to override it via production.env.
+CMD exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IPS"

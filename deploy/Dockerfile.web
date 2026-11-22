@@ -12,7 +12,7 @@
 #
 # Runtime contract (spec §3.1–3.2):
 #   - static export (output: 'export' in next.config.mjs) is baked here —
-#     NO Node runtime at all; nginx:alpine just serves the dist/ tree;
+#     NO Node runtime at all; nginx (pinned minor) just serves the dist/ tree;
 #   - SPA fallback: unknown paths resolve to /index.html (nginx-web.conf),
 #     so deep links to client routes still get the shell;
 #   - listens on 8080, published to host loopback only by compose (spec
@@ -61,7 +61,9 @@ COPY frontend/web frontend/web
 RUN pnpm --filter @memo/web... run build
 
 # ---- Runtime stage: nginx serving the static export -----------------------
-FROM nginx:alpine AS runtime
+# Pinned minor (GH #616 review): floating `alpine` silently repins on every
+# upstream release; 1.29-alpine upgrades only when this line says so.
+FROM nginx:1.29-alpine AS runtime
 
 # The export dir already includes public/ contents and _next/ hashed assets;
 # nginx-web.conf replaces the default server (SPA fallback, immutable cache

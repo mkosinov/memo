@@ -37,6 +37,13 @@ services:
     # Server env contract (spec §3.3): /opt/memo/env/production.env on the VPS,
     # root:root 0600, never committed. String form — see the file header.
     env_file: /opt/memo/env/production.env
+    # Trust boundary (spec §3.1), pinned in the open: uvicorn's
+    # --forwarded-allow-ips may name exactly the compose-network gateway
+    # (networks below). The image bakes this value into the CLI flag, which
+    # always wins over the env var — and `environment:` here beats env_file,
+    # so production.env cannot retune it either. Uvicorn-native plural name.
+    environment:
+      FORWARDED_ALLOW_IPS: "172.16.0.1"
     ports:
       - "127.0.0.1:8000:8000" # loopback only; public exposure/SSL = host nginx (#617)
     volumes:
@@ -79,7 +86,8 @@ services:
     restart: unless-stopped
 
 # The compose network gateway is a TRUST BOUNDARY for the backend (spec §3.1):
-# --forwarded-allow-ips defaults to 172.16.0.1 in Dockerfile.backend, and the
+# FORWARDED_ALLOW_IPS is pinned to 172.16.0.1 (service environment above and
+# the Dockerfile.backend default), and the
 # host nginx (#617) reaches the published loopback ports from exactly the
 # gateway address. Pin subnet + gateway so that default stays correct — with
 # the stock address pool the gateway would drift and uvicorn would stop

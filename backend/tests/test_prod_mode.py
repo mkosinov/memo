@@ -35,7 +35,7 @@ class TestEnvLiteralValidation:
     @pytest.mark.parametrize("env", ["development", "testing", "production"])
     def test_known_env_values_accepted(self, env: str) -> None:
         s = Settings(_env_file=None, ENV=env, **_PROD_SECRETS)
-        assert s.ENV == env
+        assert env == s.ENV
 
     @pytest.mark.parametrize(
         "env",

@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-11-22
+
+### Added
+- **GH #616 — Прод-деплой из main: релизы milestone → 3 образа (GHCR) →
+  VPS с откатом** — branch `616-prod-deploy` (6 задач, 16 коммитов
+  `436f5b0c..7430e1c1`, base `81d57172` = main; 29 файлов,
+  +2579/−22; спека
+  `docs/specs/2026-11-21-prod-deploy-616-design.md` рев.2, план
+  `docs/plans/2026-11-22-prod-deploy-616-plan.md` 6/6 — оба на main,
+  unchanged by IMPL; инфраструктурная фича — пользовательского
+  поведения нет):
+  - **Прод-режим backend (T1 `436f5b0c`):** `ENV` —
+    `Literal["development","testing","production"]` с отказом старта
+    на неизвестном значении; sqladmin монтируется только по явному
+    `SQLADMIN_ENABLED` (дефолт OFF); прагмы `journal_mode=WAL` +
+    `busy_timeout` закреплены регресс-пинами.
+  - **Frontend сборочные аргументы (T2 `78a191c6`):** admin
+    `output: 'standalone'` + `basePath` от `NEXT_PUBLIC_BASE_PATH`,
+    относительный `NEXT_PUBLIC_API_URL=/api` в разделяемом api-client
+    (`resolveApiUrl` — same-origin в образах, дев-фолбэк нетронут);
+    поправка архитектора — `images.unoptimized` условно на
+    относительном API-base; недвоение avatar-URL.
+  - **Каталог `deploy/` (T3 `fc5171dd`, `0586195d`, `0673a962`,
+    `de29e81f`, `5063283c`, `a75eba09` + качество `527785a4`):**
+    `Dockerfile.backend` (uv, single-process uvicorn, строгий
+    `FORWARDED_ALLOW_IPS`, non-root uid 1001), `Dockerfile.admin`
+    (multi-stage standalone), `Dockerfile.web` + `nginx-web.conf`
+    (nginx:1.29-alpine pinned, SPA-fallback, `server_tokens off`,
+    nosniff, gzip), `docker-compose.prod.yml` (loopback-порты
+    8000/3000/8080, env_file `/opt/memo/env/production.env`, тома,
+    WAL-grace, python-healthcheck).
+  - **CI-конвейер и rollout (T4 `ca648d5c`, `eed9c651`, `4cddcf97`,
+    `2e700947`):** `deploy.yml` — триггеры `release: published` +
+    `workflow_dispatch` с тегом, buildx → GHCR, job `prod-deploy`
+    no-cancel concurrency, environment production; `deploy.sh` —
+    login-if-token → pull → migrate → up → health, канон кодов выхода
+    0–5, шим `docker compose`/`docker-compose`; job `prod-build` в
+    `test.yml` на PR (сборка 3 образов без пуша + compose-прогон с
+    миграцией и проверками health/admin/web); фикс — `alembic/env.py`
+    потребляет `DATABASE_URL` (миграции бьют в смонтированную прод-БД).
+  - **Релизный скрипт (T5 `7430e1c1`):** `scripts/release.sh` —
+    проверка закрытости milestone → закрытие → notes из issues →
+    `gh release create --target main`; `--dry-run`.
+  - **Локальный прод-смоук (T6 `99706e0c`+`5e312cc7`):**
+    `scripts/prod-smoke.sh` — temp-каталог + override-тома/env,
+    migrate → up → health, 401 анониму, `/admin`-шелл, WAL-ассерт;
+    режимы default/`--rollback`/`--no-secrets`, порты
+    `SMOKE_{BACKEND,ADMIN,WEB}_PORT`; teardown без остатков;
+    прод-валидаторы `SECRET_KEY`/`OTP_PEPPER` закреплены 4 тестами.
+  - Tests: backend unit прод-режима **14/14**, полный сьют
+    **4477 passed / 92 skipped / 0 failed**; api-client **649/649**,
+    скоуп admin **125/125**, сборки rc=0; actionlint + shellcheck
+    чисто, deploy.sh dryrun **48/48**; release.sh dry-run на живом
+    milestone зелёный (23 issues); prod-smoke **3 прогона exit 0**;
+    приёмка спеки §7 — сценарии 2/3/4 смоуком, сценарий 5
+    (видимость prod-build на PR) закрывается прогоном PR, сценарий 1 —
+    локальная часть; visual gate §9 N/A → exit 0; полный CI — гейт PR
+    (manager-owned).
+  - Известные остатки (issues НЕ заводятся): операторские пред-шаги
+    первого деплоя на VPS (env-файл, `/opt/memo` chown 1001:1001,
+    откатная тренировка §6 — ждут #574/#617); секреты/переменные
+    репозитория `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/`DEPLOY_SSH_KEY`,
+    опционально `REGISTRY_TOKEN` и `vars.REGISTRY_PREFIX`.
+  - Status: `docs/status/2026-11-22-prod-deploy-616.md`
+
 ## [Unreleased] — 2026-11-21
 
 ### Added

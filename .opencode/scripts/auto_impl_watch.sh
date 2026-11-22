@@ -5,7 +5,7 @@
 # этому наблюдателю, — захватить её (статус In IMPL + поле host на борде)
 # и запустить фоном `opencode run` (дефолтный агент memo = manager).
 # ГЛОБАЛЬНОГО мьютекса и глобального бюджета нет: слоты ПО МАШИНАМ
-# (HOST_BUDGETS в gh_board.py, imac 2 / macbook 1); гонку за одну карточку
+# (host_budgets в docs/board/board_config.json: imac 2 / macbook 1 / hk 1 / gcp 1); гонку за одну карточку
 # ломает тайбрейк по полю host (запись, пауза, перечитывание — владеет
 # последний писавший, ранний отходит).
 #
@@ -25,7 +25,7 @@
 # Повторные попытки по issue ПРОДОЛЖАЮТ существующую сессию менеджера
 # (opencode run --session <id>): id берётся из БД — последняя сессия с
 # названием «<N> IMPL. …». Отдельного реестра сессий нет, БД = источник истины.
-# Ёмкость машины = бюджет хоста на БОРДЕ (HOST_BUDGETS в gh_board.py:
+# Ёмкость машины = бюджет хоста на БОРДЕ (host_budgets в docs/board/board_config.json:
 # imac 2 / macbook 1) — карточки «In IMPL» с меткой этого хоста, считается
 # внутри pick-next. Финишный менеджер, чья карточка ушла в PR (G7) на CI,
 # НЕ считается (2026-09-21, решение юзера: карточка на CI не занимает
@@ -157,7 +157,7 @@ while true; do
 
     [ -f "$STATE/auto-impl.enabled" ] || continue
 
-    # ёмкость решает борд (HOST_BUDGETS по In IMPL+host внутри pick-next;
+    # ёмкость решает борд (host_budgets из board_config.json по In IMPL+host внутри pick-next;
     # карточка на CI, статус PR (G7), не считается). Здесь — только ручная
     # заморозка машины без снятия флага: auto-impl-max = 0.
     if [ "$(cat "$STATE/auto-impl-max" 2>/dev/null || true)" = "0" ]; then

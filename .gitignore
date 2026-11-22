@@ -45,6 +45,7 @@ coverage/
 # Production seed CSV may contain staff names and addresses; keep only the fake template.
 backend/seed-data/*.csv
 !backend/seed-data/prod-seed-template.csv
+/prod-seed.csv
 
 # TypeScript
 *.tsbuildinfo
@@ -83,6 +84,10 @@ docker-compose.override.yml
 .claude/
 local-images/
 token-usage-output.txt
+
+# ZCode session artifacts (auto-generated plan file + tool-local ignore copy)
+.zcode/plans/
+.zcodeignore
 
 # Turborepo cache
 .turbo/

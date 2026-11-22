@@ -102,8 +102,11 @@ export MEMO_REGISTRY_PREFIX="$REGISTRY_PREFIX"
 
 # Through edge — the only service publishing host ports (80): the wait
 # then covers the whole nginx → backend → DB chain. Port 80 serves this
-# exact path to loopback ONLY (exact-match location with allow 127.0.0.1
-# in deploy/nginx.conf; GH #616).
+# exact path via a PUBLIC exact-match location (deploy/nginx.conf): no
+# source-IP restriction — behind docker's userland proxy every client
+# arrives as the compose-gateway IP, so a guard would gate nothing (and
+# 403 the deploy probe itself); the endpoint is unauthenticated by design
+# with the same exposure as via 443.
 HEALTH_URL=http://127.0.0.1/api/v1/health
 HEALTH_TIMEOUT_SECONDS=${HEALTH_TIMEOUT_SECONDS:-120}
 

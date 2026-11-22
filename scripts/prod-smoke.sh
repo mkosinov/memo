@@ -8,8 +8,11 @@
 # for the infra feature until the VPS exists (#574). Never touches
 # /opt/memo: the VPS env/volume contract (spec §3.3) is swapped for temp
 # paths via a generated compose override (same trick as the test.yml
-# `prod-build` job; env_file in the base file is STRING form exactly so an
-# override replaces it wholesale).
+# `prod-build` job). NB: compose UNIONS `env_file` across merged files even
+# in string form — an override does NOT replace it wholesale — which is why
+# the generated port-adapted copy of the base file also strips the base
+# env_file line (the sed below); without that strip, a local
+# /opt/memo/env/production.env would leak into the smoke containers.
 #
 # Usage:
 #   scripts/prod-smoke.sh                # default: spec §7 scenario 3 —

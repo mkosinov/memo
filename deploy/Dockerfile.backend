@@ -7,17 +7,20 @@
 # Runtime contract (spec §3.1–3.2):
 #   - uvicorn src.main:app, exactly ONE process, NO --reload (event fanout is
 #     single-process by design);
-#   - --forwarded-allow-ips is a TRUST BOUNDARY: only the address nginx/gateway
-#     connects from. Default = compose-network gateway (172.16.0.1, pinned by
-#     deploy/docker-compose.prod.yml); override via build ARG or compose
-#     environment, NEVER '*'.
+#   - --forwarded-allow-ips is a TRUST BOUNDARY: only the address the edge
+#     service connects from. Default = edge's STATIC compose-network IP
+#     (172.16.0.10, pinned by deploy/docker-compose.prod.yml as the edge
+#     networks.default.ipv4_address AND the backend environment
+#     FORWARDED_ALLOW_IPS there — keep the three in sync); override via
+#     build ARG or compose environment, NEVER '*'.
 #   - runs as non-root: fixed uid/gid 1001 (`memo`), created before the first
 #     COPY so every /app layer is memo-owned (--chown; no rewriting chown
-#     layer). HOST-SIDE OWNERSHIP CONTRACT: /opt/memo/data and /opt/memo/files
+#     layer). HOST-SIDE OWNERSHIP CONTRACT: /opt/memo/data and /opt/memo/media
 #     are host bind mounts, so the operator must
-#       chown 1001:1001 /opt/memo/data /opt/memo/files
+#       chown 1001:1001 /opt/memo/data /opt/memo/media
 #     on the VPS (or remap the image UID to match the host owner) — SQLite
-#     WAL/-shm creation and avatar writes run as uid 1001 and fail with EACCES
+#     WAL/-shm creation and avatar writes (FILES_DIR=/opt/memo/media,
+#     uploads live in avatars/ under it) run as uid 1001 and fail with EACCES
 #     on root-owned mount points.
 #   - no curl / no HEALTHCHECK here: healthcheck lives in compose (python one-liner);
 #   - alembic ships in the image: migrations run as an explicit step
@@ -53,10 +56,12 @@ RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Compose-network gateway by default (see header); compose pins it explicitly.
-# Uvicorn-native plural name; the env var only feeds the CLI flag below —
-# uvicorn never reads it directly, because the flag is always present.
-ARG FORWARDED_ALLOW_IPS=172.16.0.1
+# Edge's static compose-network IP by default (see header; spec §3.2): the
+# value compose pins explicitly via the backend environment — three places
+# carry it, keep them in sync. Uvicorn-native plural name; the env var only
+# feeds the CLI flag below — uvicorn never reads it directly, because the
+# flag is always present.
+ARG FORWARDED_ALLOW_IPS=172.16.0.10
 ENV FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS}
 
 EXPOSE 8000

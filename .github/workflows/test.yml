@@ -574,9 +574,13 @@ jobs:
   # compose loopback ones (8000/3000/8080), disjoint from the e2e shards
   # (3002–3006/8001–8005); every job runs on its own runner VM anyway.
   #
-  # Alembic migrations are deliberately NOT run here: /api/v1/health
-  # answers 200 without a migrated schema (SELECT 1 only), and the
-  # migration path is covered by the §5 local smoke instead.
+  # Alembic migrations ARE run here, at deploy.sh ordering (BEFORE
+  # `up -d`, spec §3.2/§4.2): alembic/env.py consumes DATABASE_URL, so
+  # `compose run backend alembic upgrade head` migrates the
+  # volume-mounted runner-temp prod DB — a regression to the ephemeral
+  # in-container memo.db (the pre-#616 env.py defect) goes red here on
+  # every PR, not at the next release deploy. Health alone cannot catch
+  # it: /api/v1/health answers 200 without a migrated schema (SELECT 1).
   prod-build:
     name: Prod build smoke (3 images, no push)
     runs-on: ubuntu-24.04
@@ -665,6 +669,18 @@ jobs:
             web:
               image: memo-web:pr-smoke
           YAML
+
+      # deploy.sh §"migrations BEFORE up -d" — same leg, same ordering
+      # here: the stack starts only against a migrated schema. The
+      # compose `run` inherits the backend env_file (DATABASE_URL →
+      # /opt/memo/data/memo.db = the volume-mounted runner temp dir), so
+      # this step is the live CI proof of the env.py DATABASE_URL fix.
+      # -T: no TTY on the runner (deploy.sh precedent over ssh).
+      - name: Run alembic migrations (before up -d)
+        run: |
+          SMOKE_DIR="$RUNNER_TEMP/memo-prod-smoke"
+          docker compose -f deploy/docker-compose.prod.yml \
+            -f "$SMOKE_DIR/override.yml" run --rm -T backend alembic upgrade head
 
       - name: Start the stack (compose up -d)
         run: |

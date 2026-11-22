@@ -23,8 +23,11 @@
 #   docker compose run --rm backend alembic upgrade head
 #
 # Local smoke (spec §5) swaps env_file/volumes via a second `-f` override file.
-# env_file is deliberately STRING form: an override REPLACES a string, while a
-# list would append — and then fail on the missing server env file.
+# CAUTION (GH #616 Task 6, verified empirically on docker-compose v2.32.1):
+# compose UNIONS `env_file` across merged files — a string-form value in an
+# override does NOT replace this one, so an override alone cannot fully take
+# over the env contract where /opt/memo/env/production.env exists. The smoke
+# therefore strips this line from its generated port-adapted copy.
 #
 # No `version:` key — deprecated and ignored by Compose v2.
 #

@@ -52,6 +52,40 @@ class TestEnvLiteralValidation:
             Settings(_env_file=None, ENV=env, **_PROD_SECRETS)
 
 
+class TestProdSecretsFailFast:
+    """§3.3 / §7 scenario 4 — ENV=production demands explicit secrets.
+
+    The prod smoke (scripts/prod-smoke.sh --no-secrets) asserts the IMAGE
+    refuses to boot without them; these are the unit-level twin of that
+    container-level refusal.
+    """
+
+    def test_prod_without_secret_key_refuses_startup(self) -> None:
+        with pytest.raises(
+            ValidationError, match="SECRET_KEY must be set when ENV=production"
+        ):
+            Settings(_env_file=None, ENV="production", OTP_PEPPER="p")
+
+    def test_prod_without_otp_pepper_refuses_startup(self) -> None:
+        with pytest.raises(
+            ValidationError, match="OTP_PEPPER must be set when ENV=production"
+        ):
+            Settings(_env_file=None, ENV="production", SECRET_KEY="k")
+
+    def test_prod_with_both_secrets_accepted(self) -> None:
+        s = Settings(_env_file=None, ENV="production", **_PROD_SECRETS)
+        assert s.SECRET_KEY == "k"
+        assert s.OTP_PEPPER == "p"
+
+    @pytest.mark.parametrize("env", ["development", "testing"])
+    def test_non_prod_envs_keep_dev_defaults(self, env: str) -> None:
+        """No DX change outside production: unset secrets resolve to the
+        fixed dev constants, not a validation error."""
+        s = Settings(_env_file=None, ENV=env)
+        assert s.SECRET_KEY == "dev-sqladmin-secret"
+        assert s.OTP_PEPPER == "dev-otp-pepper"
+
+
 class TestSqlitePragmas:
     """§3.2 — regression pins for the WAL + busy_timeout engine setup."""
 

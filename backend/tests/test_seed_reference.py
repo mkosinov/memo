@@ -165,7 +165,11 @@ async def test_load_accepts_is_public_both_polarities(both_public_values: Path) 
     """is_public parses on both polarities."""
     data = load_reference_data(both_public_values)
     by_title = {loc.title: loc.is_public for loc in data.locations}
-    assert by_title == {"Примерная мастерская": True, "Скрытая мастерская": False}
+    assert by_title == {
+        "Примерная мастерская": True,
+        "Скрытая мастерская": False,
+        "Запасная площадка": False,
+    }
 
 
 async def test_apply_writes_is_public_both_polarities(
@@ -176,7 +180,11 @@ async def test_apply_writes_is_public_both_polarities(
 
     async with db_manager.async_session() as session:
         rows = {loc.title: loc.is_public for loc in (await session.scalars(select(Location))).all()}
-    assert rows == {"Примерная мастерская": True, "Скрытая мастерская": False}
+    assert rows == {
+        "Примерная мастерская": True,
+        "Скрытая мастерская": False,
+        "Запасная площадка": False,
+    }
 
 
 async def test_re_run_updates_is_public_in_place(
@@ -204,8 +212,14 @@ async def test_re_run_updates_is_public_in_place(
 
 def test_shipped_csv_template_checks_and_has_linked_specialties() -> None:
     data = load_reference_data(DEFAULT_CSV)
-    assert len(data.locations) == 1
-    assert all(loc.is_public for loc in data.locations)
+    # Spec §5.2: the shipped template carries BOTH is_public polarities —
+    # the «template is always valid» contract includes the demo of every
+    # column value shape the owner's real file may use.
+    assert len(data.locations) == 2
+    assert {loc.title: loc.is_public for loc in data.locations} == {
+        "Примерная мастерская": True,
+        "Запасная площадка": False,
+    }
     assert data.specialties == ["Моделирование", "Графика"]
     assert data.services[0].specialty == "Графика"
     assert [item.title for item in data.services[0].materials] == ["Учебный материал"]
@@ -233,7 +247,7 @@ def test_tags_section_is_optional_and_absence_clears_tag_lists(csv_path: Path) -
     text = text.replace(";0;пример;True", ";0;;True")
     text = text.replace(";90;;пример", ";90;;")
     text = text.replace(";#456789;True;пример", ";#456789;True;")
-    text = text.replace("\ntags\n;title\n;пример\n\nspecialty", "\nspecialty")
+    text = text.replace("\ntags\n;title\n;пример\n;демонстрация\n\nspecialty", "\nspecialty")
     csv_path.write_text(text, encoding="utf-8")
 
     data = load_reference_data(csv_path)
@@ -285,7 +299,7 @@ def test_bad_integer_reports_starting_csv_line(csv_path: Path) -> None:
     text = csv_path.read_text(encoding="utf-8")
     csv_path.write_text(text.replace(";Графика;8;;90;;пример", ";Графика;много;;90;;пример"))
 
-    with pytest.raises(SeedDataError, match=r"строка 7 .*min_age"):
+    with pytest.raises(SeedDataError, match=r"строка 8 .*min_age"):
         load_reference_data(csv_path)
 
 
@@ -304,7 +318,7 @@ def test_unknown_staff_position_fails_during_check(csv_path: Path) -> None:
     with pytest.raises(SeedDataError) as exc_info:
         load_reference_data(csv_path)
     message = str(exc_info.value)
-    assert message.startswith("строка 23: ")
+    assert message.startswith("строка 24: ")
     assert (
         "staff «Алексей Примеров»: должность «Неизвестная» не найдена. "
         "Объявите её в блоке positions или поправьте название" in message
@@ -336,7 +350,7 @@ def test_tariff_reference_to_unknown_service_fails_with_line(csv_path: Path) -> 
     with pytest.raises(SeedDataError) as exc_info:
         load_reference_data(csv_path)
     message = str(exc_info.value)
-    assert message.startswith("строка 19: ")
+    assert message.startswith("строка 20: ")
     assert "услуга «Неизвестная услуга» из tariffs не найдена в секции services" in message
 
 
@@ -356,7 +370,7 @@ def test_service_materials_unknown_material_fails_with_line(csv_path: Path) -> N
     with pytest.raises(SeedDataError) as exc_info:
         load_reference_data(csv_path)
     message = str(exc_info.value)
-    assert message.startswith("строка 15: ")
+    assert message.startswith("строка 16: ")
     assert "материал «Неизвестный материал» не найден в секции materials" in message
 
 
@@ -376,7 +390,7 @@ def test_service_materials_unknown_service_fails_with_line(csv_path: Path) -> No
     with pytest.raises(SeedDataError) as exc_info:
         load_reference_data(csv_path)
     message = str(exc_info.value)
-    assert message.startswith("строка 15: ")
+    assert message.startswith("строка 16: ")
     assert (
         "услуга «Неизвестная услуга» из service_materials "
         "не найдена в секции services" in message
@@ -396,7 +410,7 @@ def test_unknown_service_specialty_fails_naming_value(csv_path: Path) -> None:
     with pytest.raises(SeedDataError) as exc_info:
         load_reference_data(csv_path)
     message = str(exc_info.value)
-    assert message.startswith("строка 7: ")
+    assert message.startswith("строка 8: ")
     assert (
         "services «Линогравюра для примера»: направление «Батик» "
         "не найдено в справочнике. Объявите его в секции specialty "
@@ -416,7 +430,7 @@ def test_unknown_master_specialty_fails_naming_value(csv_path: Path) -> None:
     with pytest.raises(SeedDataError) as exc_info:
         load_reference_data(csv_path)
     message = str(exc_info.value)
-    assert message.startswith("строка 23: ")
+    assert message.startswith("строка 24: ")
     assert (
         "staff «Алексей Примеров»: направление «Батик» "
         "не найдено в справочнике. Объявите его в секции specialty "
@@ -435,7 +449,7 @@ def test_master_block_requires_specialty_and_color(csv_path: Path) -> None:
 def test_unknown_section_and_duplicate_header_report_csv_lines(csv_path: Path) -> None:
     text = csv_path.read_text(encoding="utf-8")
     csv_path.write_text(text.replace("\nmaterials\n", "\nunknown_section\n"))
-    with pytest.raises(SeedDataError, match=r"строка 9: неизвестная секция"):
+    with pytest.raises(SeedDataError, match=r"строка 10: неизвестная секция"):
         load_reference_data(csv_path)
 
     text = DEFAULT_CSV.read_text(encoding="utf-8")
@@ -445,7 +459,7 @@ def test_unknown_section_and_duplicate_header_report_csv_lines(csv_path: Path) -
             ";title;description;image_url;specialty;min_age;max_age;duration;record_info;tags;tags",
         )
     )
-    with pytest.raises(SeedDataError, match=r"строка 6 .*повтор колонки tags"):
+    with pytest.raises(SeedDataError, match=r"строка 7 .*повтор колонки tags"):
         load_reference_data(csv_path)
 
 
@@ -453,7 +467,7 @@ def test_unclosed_quoted_cell_reports_record_start(csv_path: Path) -> None:
     text = csv_path.read_text(encoding="utf-8")
     csv_path.write_text(text.replace("Демонстрационная услуга", '"Демонстрационная услуга'))
 
-    with pytest.raises(SeedDataError, match=r"строка 7: ошибка CSV"):
+    with pytest.raises(SeedDataError, match=r"строка 8: ошибка CSV"):
         load_reference_data(csv_path)
 
 
@@ -496,7 +510,7 @@ def test_unmatched_extra_data_cell_is_rejected(csv_path: Path) -> None:
     )
     csv_path.write_text(text, encoding="utf-8")
 
-    with pytest.raises(SeedDataError, match=r"строка 7 .*колонок данных, в шапке 9"):
+    with pytest.raises(SeedDataError, match=r"строка 8 .*колонок данных, в шапке 9"):
         load_reference_data(csv_path)
 
 
@@ -552,7 +566,7 @@ def test_specialty_title_over_column_width_fails_with_line(csv_path: Path) -> No
     csv_path.write_text(text.replace("\n;Графика", f"\n;{'А' * (SPECIALTY_MAX + 1)}"))
 
     with pytest.raises(
-        SeedDataError, match=rf"строка 36 \(specialty\).*длиннее {SPECIALTY_MAX} символов"
+        SeedDataError, match=rf"строка 38 \(specialty\).*длиннее {SPECIALTY_MAX} символов"
     ):
         load_reference_data(csv_path)
 
@@ -563,7 +577,7 @@ def test_specialty_section_ci_duplicates_fail_load(csv_path: Path) -> None:
     text = csv_path.read_text(encoding="utf-8")
     csv_path.write_text(text.replace("\n;Графика", "\n;Графика\n;ГРАФИКА"))
 
-    with pytest.raises(SeedDataError, match=r"строка 37.*дважды"):
+    with pytest.raises(SeedDataError, match=r"строка 39.*дважды"):
         load_reference_data(csv_path)
 
 
@@ -574,7 +588,7 @@ def test_tariff_audience_invalid_value_russian_error(csv_path: Path) -> None:
     text = csv_path.read_text(encoding="utf-8")
     csv_path.write_text(text.replace(";1000;all", ";1000;подростки"))
 
-    with pytest.raises(SeedDataError, match=r"строка 19 .*kid, adult или all"):
+    with pytest.raises(SeedDataError, match=r"строка 20 .*kid, adult или all"):
         load_reference_data(csv_path)
 
 
@@ -605,7 +619,7 @@ def test_multiline_quoted_field_error_cites_record_start(csv_path: Path) -> None
     )
     csv_path.write_text(text, encoding="utf-8")
 
-    with pytest.raises(SeedDataError, match=r"строка 7 .*min_age"):
+    with pytest.raises(SeedDataError, match=r"строка 8 .*min_age"):
         load_reference_data(csv_path)
 
 
@@ -663,7 +677,9 @@ def test_tags_section_present_collects_tags() -> None:
     """Spec §6 №1: with the optional ``tags`` section present, the dictionary
     is collected and tag columns assemble into entity tag lists."""
     data = load_reference_data(DEFAULT_CSV)
-    assert data.tags == ["пример"]
+    # Spec §5.2: 1–2 example tags; the second («демонстрация») stays
+    # unreferenced — a dictionary entry may wait for future links.
+    assert data.tags == ["пример", "демонстрация"]
     assert data.locations[0].tags == ["пример"]
     assert data.services[0].tags == ["пример"]
     assert data.staff[0].master is not None
@@ -730,14 +746,14 @@ def test_partial_master_fill_reports_staff_line(csv_path: Path) -> None:
     full = csv_path.read_text(encoding="utf-8")
 
     csv_path.write_text(full.replace(";#456789;True;пример", ";;True;пример"))
-    with pytest.raises(SeedDataError, match=r"строка 23 .*master_color обязателен"):
+    with pytest.raises(SeedDataError, match=r"строка 24 .*master_color обязателен"):
         load_reference_data(csv_path)
 
     csv_path.write_text(
         full.replace('"Графика;Моделирование";#456789;True;пример', '"";;;пример'),
         encoding="utf-8",
     )
-    with pytest.raises(SeedDataError, match=r"строка 23 .*master_specialty обязателен"):
+    with pytest.raises(SeedDataError, match=r"строка 24 .*master_specialty обязателен"):
         load_reference_data(csv_path)
 
 
@@ -745,14 +761,14 @@ def test_partial_master_fill_reports_staff_line(csv_path: Path) -> None:
     ("original", "replacement", "section", "column", "line"),
     [
         ("Учебный адрес, 1;;12;", "Учебный адрес, 1;;;", "locations", "capacity", 3),
-        (";Графика;8;;90;", ";Графика;;;90;", "services", "min_age", 7),
-        (";Графика;8;;90;", ";Графика;8;;;", "services", "duration", 7),
+        (";Графика;8;;90;", ";Графика;;;90;", "services", "min_age", 8),
+        (";Графика;8;;90;", ";Графика;8;;;", "services", "duration", 8),
         (
             ";Демонстрационный тариф;1000;all",
             ";Демонстрационный тариф;;all",
             "tariffs",
             "price",
-            19,
+            20,
         ),
     ],
 )
@@ -792,7 +808,7 @@ def test_blank_required_integer_columns_fail(
             ";Демонстрационный тариф;1000р;all",
             "tariffs",
             "price",
-            19,
+            20,
         ),
     ],
 )
@@ -864,7 +880,7 @@ def test_duplicate_section_marker_fails_with_line(csv_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(SeedDataError, match=r"строка 30: секция materials повторяется"):
+    with pytest.raises(SeedDataError, match=r"строка 31: секция materials повторяется"):
         load_reference_data(csv_path)
 
 
@@ -874,7 +890,7 @@ def test_marker_with_non_empty_tail_fails_with_line(csv_path: Path) -> None:
     text = csv_path.read_text(encoding="utf-8")
     csv_path.write_text(text.replace("\nmaterials\n", "\nmaterials;примечание\n"), encoding="utf-8")
 
-    with pytest.raises(SeedDataError, match=r"строка 9 .*первая колонка должна быть пустой"):
+    with pytest.raises(SeedDataError, match=r"строка 10 .*первая колонка должна быть пустой"):
         load_reference_data(csv_path)
 
 
@@ -1058,7 +1074,7 @@ def test_check_prints_summary_without_touching_db(
     assert main(["--csv", str(DEFAULT_CSV), "--check"]) == 0
     out = capsys.readouterr().out
     assert (
-        "локаций 1, услуг 1, тегов 1, материалов 1, направлений 2, "
+        "локаций 2, услуг 1, тегов 2, материалов 1, направлений 2, "
         "сотрудников 1, должностей 2" in out
     )
     assert "Проверка пройдена" in out
@@ -1107,7 +1123,7 @@ def test_dry_run_on_in_memory_db_prints_summary_and_changes_nothing(
 
         out = capsys.readouterr().out
         assert "Итог:" in out
-        assert "Локации: создано 1, обновлено 0, без изменений 0" in out
+        assert "Локации: создано 2, обновлено 0, без изменений 0" in out
         assert "Услуги: создано 1, обновлено 0, без изменений 0" in out
         assert "ПРОБНЫЙ ЗАПУСК: изменения откатаны, база не изменена." in out
 
@@ -1146,49 +1162,49 @@ _DUPLICATE_CASES: list[tuple[str, str, int, str, str]] = [
     (
         ";Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример",
         ";Линогравюра для примера;Дубль;;Графика;8;;90;;",
-        8,
+        9,
         "секция services",
         "Линогравюра для примера",
     ),
     (
         ";Учебный материал;Материал только для примера",
         ";Учебный материал;Дубль",
-        12,
+        13,
         "секция materials",
         "Учебный материал",
     ),
     (
         "\n;Мастер",
         ";Мастер",
-        28,
+        29,
         "секция positions",
         "Мастер",
     ),
     (
         "\n;пример",
         ";пример",
-        33,
+        34,
         "секция tags",
         "пример",
     ),
     (
         ';Алексей;Примеров;0;;"Мастер;Администратор";"Графика;Моделирование";#456789;True;пример',
         ";Алексей;Примеров;1;;;;;;",
-        24,
+        25,
         "секция staff",
         "Алексей Примеров",
     ),
     (
         ";Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all",
         ";Линогравюра для примера;Обычный;Дубль тарифа;2000;kid",
-        20,
+        21,
         "services «Линогравюра для примера» (tariffs)",
         "Обычный",
     ),
     (
         ";Линогравюра для примера;Учебный материал;Для демонстрации связи",
         ";Линогравюра для примера;Учебный материал;",
-        16,
+        17,
         "services «Линогравюра для примера» (materials)",
         "Учебный материал",
     ),
@@ -1223,7 +1239,7 @@ def test_max_age_below_min_age_fails_with_service_line(csv_path: Path) -> None:
     _mutated(csv_path, ";Графика;8;;90;", ";Графика;8;3;90;")
 
     with pytest.raises(
-        SeedDataError, match=r"строка 7 \(services\).*max_age не может быть меньше min_age"
+        SeedDataError, match=r"строка 8 \(services\).*max_age не может быть меньше min_age"
     ):
         load_reference_data(csv_path)
 
@@ -1235,7 +1251,7 @@ def test_master_color_must_be_hex_rgb_with_staff_line(csv_path: Path) -> None:
 
     with pytest.raises(
         SeedDataError,
-        match=r"строка 23 \(staff\): color: String should match pattern '\^#\[0-9A-Fa-f\]\{6\}\$'",
+        match=r"строка 24 \(staff\): color: String should match pattern '\^#\[0-9A-Fa-f\]\{6\}\$'",
     ):
         load_reference_data(csv_path)
 
@@ -1270,11 +1286,11 @@ async def test_re_run_is_idempotent(db_manager: DBManager, csv_path: Path) -> No
 
     assert summary.stats and all(stats.created == 0 for stats in summary.stats.values())
     expected_unchanged = {
-        "Теги": 1,
+        "Теги": 2,
         "Материалы": 1,
         "Должности": 2,
         "Направления": 2,
-        "Локации": 1,
+        "Локации": 2,
         "Услуги": 1,
         "Тарифы": 1,
         "Сотрудники": 1,
@@ -1376,15 +1392,15 @@ async def test_empty_tag_columns_clear_links_and_keep_tag_entities(
     text = text.replace(";0;пример;True", ";0;;True")
     text = text.replace(";90;;пример", ";90;;")
     text = text.replace(";#456789;True;пример", ";#456789;True;")
-    text = text.replace("\ntags\n;title\n;пример\n\nspecialty", "\nspecialty")
+    text = text.replace("\ntags\n;title\n;пример\n;демонстрация\n\nspecialty", "\nspecialty")
     csv_path.write_text(text, encoding="utf-8")
 
     await _apply(db_manager, csv_path)
 
     async with db_manager.async_session() as session:
         # «сущности-теги не удалены»
-        tags = [row.title for row in (await session.scalars(select(Tag))).all()]
-        assert tags == ["пример"]
+        tags = sorted(row.title for row in (await session.scalars(select(Tag))).all())
+        assert tags == ["демонстрация", "пример"]
         # «связи перечисленных сущностей очищены» — all three link kinds
         assert list((await session.scalars(select(location_tags.c.tag_id))).all()) == []
         assert list((await session.scalars(select(service_tags.c.tag_id))).all()) == []

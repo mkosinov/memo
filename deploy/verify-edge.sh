@@ -55,9 +55,11 @@ trap cleanup EXIT
 # The comparison then enforces:
 #   - every location of the prod 443 server appears in the smoke conf
 #     VERBATIM — same path/modifier and the same directive sequence;
-#   - the smoke conf carries exactly ONE extra location — the deploy
-#     health route `= /api/v1/health` — and it matches the prod :80
-#     server's health stanza directive-for-directive;
+#   - the deploy health route `= /api/v1/health` is PRESENT in the smoke
+#     conf and mirrors the prod :80 server's health stanza directive-for-
+#     directive (deleting it must fail the guard, not pass silently);
+#   - beyond that, the smoke conf carries NO location the prod 443 server
+#     does not have;
 #   - the :80-only pieces of nginx.conf (ACME webroot location, the
 #     301-to-https fallback) are deliberately NOT required in the smoke
 #     conf (TLS-off world has neither).
@@ -145,6 +147,15 @@ while IFS= read -r rec; do
 done <<EOF
 $EXTRAS
 EOF
+# Presence assert: the deploy health route must EXIST in the smoke conf.
+# Without it, deleting the stanza would pass silently — the required-set
+# loop above only knows about prod-443 locations, and the extras loop
+# above only flags locations that ARE there.
+if ! printf '%s\n' "$SMOKE_ALL" | grep -qFx -- "$PROD_80_HEALTH"; then
+    note "FAIL: deploy health route '= /api/v1/health' missing or diverged in the smoke conf (must mirror the prod :80 stanza):"
+    note "      $PROD_80_HEALTH"
+    drift=1
+fi
 [ "$drift" = 0 ] || exit 1
 note "    routing mirrors in sync (443 locations verbatim + health route)"
 

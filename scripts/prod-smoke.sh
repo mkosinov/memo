@@ -427,9 +427,10 @@ TEARDOWN() {
       if [ "$rc" -eq 0 ]; then rc=8; fi
     fi
   fi
-  # Canonical env — BEFORE the temp dir goes away (the backup lives there):
-  # restore the pre-existing file (SAFETY GUARD above), or remove the dummy
-  # this run rendered (machine left as found; best effort by design).
+  # Canonical env: restore the pre-existing file (SAFETY GUARD above) or
+  # remove the dummy this run rendered (machine left as found; best effort
+  # by design). The backup lives BESIDE the target
+  # (/opt/memo/env/production.env.pre-smoke.bak), never in the temp dir.
   if [ "$ENV_MOVED" = 1 ] && [ -f "$ENV_BACKUP" ]; then
     if env_do mv -f -- "$ENV_BACKUP" "$ENV_TARGET"; then
       log "env guard: pre-existing $ENV_TARGET restored (mv — byte-exact, mode preserved)"

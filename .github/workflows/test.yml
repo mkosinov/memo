@@ -753,7 +753,7 @@ jobs:
               fi
               sleep 1
             done
-            echo "ERROR: $label did not answer 2xx at $url within 120s (last HTTP $code)"
+            echo "ERROR: $label did not answer 2xx at $url within 120s (last HTTP $code after $i attempts)"
             return 1
           }
           EDGE_URL="http://127.0.0.1:${SMOKE_EDGE_PORT:-8080}"

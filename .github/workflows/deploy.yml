@@ -1,0 +1,225 @@
+# Production deploy (GH #616, spec §4.2–4.3): release → images → VPS.
+#
+# Triggers: `release: published` (one release = one rollout) or a manual
+# workflow_dispatch with a tag — rollback is a CONSCIOUS dispatch with the
+# previous release tag (§4.3: no auto-rollback by design).
+#
+#   build  — checkout the TAG NAME (never github.sha: for annotated tags the
+#            event sha is unreliable), build the 3 prod images with buildx +
+#            GHA layer cache, push them tagged with the release tag.
+#   deploy — queue on `prod-deploy` (parallel rollouts forbidden — one SQLite
+#            writer), scp deploy.sh + docker-compose.prod.yml FROM THE RELEASE
+#            CHECKOUT (the deploy script always matches the deployed version)
+#            and run deploy.sh on the VPS.
+#
+# Registry namespace: `vars.REGISTRY_PREFIX` repo variable, default
+# `ghcr.io/<owner>/<repo>` lowercased. The default MUST stay byte-equal to the
+# compose-side default (deploy/docker-compose.prod.yml interpolates
+# ${MEMO_REGISTRY_PREFIX:-ghcr.io/mkosinov/memo}) so a manual `deploy.sh <tag>`
+# on the VPS without the env var pulls the same images CI pushed. GHCR rejects
+# uppercase paths — the repo path is already lowercase, the tr keeps the
+# workflow robust.
+#
+# Secrets (spec §3.3 — deploy access ONLY, app secrets never enter GitHub):
+# environment `production` holds DEPLOY_SSH_HOST / DEPLOY_SSH_USER /
+# DEPLOY_SSH_KEY (VPS access) and REGISTRY_TOKEN (read:packages PAT, needed
+# only when the images are private; deploy.sh skips registry login when it is
+# empty). GITHUB_TOKEN (packages: write) pushes the images in `build`.
+
+name: Deploy
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build & deploy (rollback: the PREVIOUS release tag, spec §4.3)'
+        required: true
+        type: string
+
+# Least privilege by default; `build` widens to packages: write locally.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & push images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # Single source of truth for the tag: release event first, dispatch
+      # input second. Fails closed when both are empty (misconfigured
+      # dispatch) instead of silently building some random ref.
+      - name: Resolve release tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="${RELEASE_TAG:-$INPUT_TAG}"
+          if [ -z "$tag" ]; then
+            echo "::error::No release tag: neither github.event.release.tag_name nor inputs.tag is set."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          # Spec §4.2: by tag name, not github.sha.
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Resolve registry prefix
+        id: registry
+        env:
+          REGISTRY_PREFIX: ${{ vars.REGISTRY_PREFIX }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          prefix="${REGISTRY_PREFIX:-ghcr.io/${GITHUB_REPOSITORY}}"
+          # GHCR paths are case-sensitive lowercase.
+          prefix="$(printf '%s' "$prefix" | tr '[:upper:]' '[:lower:]')"
+          prefix="${prefix%/}"
+          if [ -z "$prefix" ] || [ "$prefix" = "${prefix#*/}" ]; then
+            echo "::error::Registry prefix must be <host>/<namespace>, got '$prefix'."
+            exit 1
+          fi
+          {
+            echo "prefix=$prefix"
+            echo "host=${prefix%%/*}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Registry host: ${prefix%%/*}, namespace prefix: $prefix"
+
+      - name: Registry login (GITHUB_TOKEN)
+        uses: docker/login-action@v3
+        with:
+          # Host of the resolved prefix (ghcr.io for the default). A non-GHCR
+          # vars.REGISTRY_PREFIX override fails HERE, loudly, instead of as a
+          # cryptic push error later.
+          registry: ${{ steps.registry.outputs.host }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build args are baked into the Dockerfiles (public values only, spec
+      # §3.3) — the workflow passes none. Contexts: backend image builds from
+      # backend/; admin/web need the repo root (pnpm workspace: packages/ +
+      # root lockfile). Per-image GHA cache scopes keep the three builds from
+      # evicting each other's cache entries.
+      - name: Build & push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: deploy/Dockerfile.backend
+          push: true
+          tags: ${{ steps.registry.outputs.prefix }}/backend:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=memo-backend
+          cache-to: type=gha,mode=max,scope=memo-backend
+
+      - name: Build & push admin image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.admin
+          push: true
+          tags: ${{ steps.registry.outputs.prefix }}/admin:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=memo-admin
+          cache-to: type=gha,mode=max,scope=memo-admin
+
+      - name: Build & push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.web
+          push: true
+          tags: ${{ steps.registry.outputs.prefix }}/web:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=memo-web
+          cache-to: type=gha,mode=max,scope=memo-web
+
+    outputs:
+      # Plain strings: job outputs accept no description metadata.
+      tag: ${{ steps.tag.outputs.tag }}
+      registry-prefix: ${{ steps.registry.outputs.prefix }}
+
+  deploy:
+    name: Deploy to production VPS
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Spec §4.2: one rollout at a time (single SQLite writer). Queued runs
+    # WAIT — never cancel an in-flight deploy.
+    concurrency:
+      group: prod-deploy
+      cancel-in-progress: false
+    # Spec §4.2: environment `production` gates the VPS secrets below.
+    environment: production
+
+    env:
+      SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      # Read:packages PAT; empty when the images are public — deploy.sh then
+      # skips registry login.
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+      DEPLOY_TAG: ${{ needs.build.outputs.tag }}
+      MEMO_REGISTRY_PREFIX: ${{ needs.build.outputs.registry-prefix }}
+
+    steps:
+      # Spec §4.2: scp the deploy files FROM THE RELEASE CHECKOUT — deploy.sh
+      # and compose always correspond to the deployed version.
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.tag }}
+
+      - name: Setup SSH key and known_hosts
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -H "$SSH_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Copy deploy files to the VPS
+        run: |
+          ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" "mkdir -p /opt/memo/deploy"
+          scp -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+            deploy/deploy.sh deploy/docker-compose.prod.yml \
+            "$SSH_USER@$SSH_HOST:/opt/memo/deploy/"
+
+      # ── deploy.sh interface (GH #616 subtask 2 — implement EXACTLY) ─────
+      #
+      # Remote layout (scp'ed from the release checkout):
+      #   /opt/memo/deploy/deploy.sh
+      #   /opt/memo/deploy/docker-compose.prod.yml   (same directory —
+      #     deploy.sh runs docker compose next to itself)
+      #
+      # Invocation (cwd /opt/memo/deploy):
+      #   ./deploy.sh <release-tag>
+      #
+      # Env provided by this workflow:
+      #   MEMO_IMAGE_TAG        release tag — mirror of $1; the compose
+      #                         interpolation variable (compose fails closed
+      #                         without it: no silent `latest`)
+      #   MEMO_REGISTRY_PREFIX  compose image namespace (same default as
+      #                         compose itself)
+      #   REGISTRY_TOKEN        optional; non-empty → docker login to pull
+      #                         PRIVATE images; empty → no login. deploy.sh
+      #                         must never echo it.
+      #
+      # deploy.sh must (spec §4.2): pull the 3 tagged images, run
+      # `docker compose run --rm backend alembic upgrade head` BEFORE `up -d`,
+      # then wait for /api/v1/health in a loop (python one-liner — no curl in
+      # the image). Any failure → non-zero exit → this job goes red; the
+      # rollback path is a conscious re-dispatch with the previous tag (§4.3).
+      - name: Run deploy.sh on the VPS
+        run: |
+          ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "cd /opt/memo/deploy && chmod +x deploy.sh && MEMO_IMAGE_TAG='$DEPLOY_TAG' MEMO_REGISTRY_PREFIX='$MEMO_REGISTRY_PREFIX' REGISTRY_TOKEN='$REGISTRY_TOKEN' ./deploy.sh '$DEPLOY_TAG'"

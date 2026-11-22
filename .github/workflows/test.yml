@@ -645,18 +645,23 @@ jobs:
       # also exercises the fail-fast on empty SECRET_KEY/OTP_PEPPER for
       # free). Unquoted heredoc so $(openssl …) evaluates BEFORE the
       # pipe; render-env.sh never echoes values and neither does this
-      # step (no set -x). The runner user is root and render-env.sh
-      # mkdir -p's the dir itself — the mkdir here is belt and braces.
+      # step (no set -x). GitHub-hosted runners execute steps as the
+      # NON-ROOT `runner` user (passwordless sudo, /opt is root-owned):
+      # every write goes through sudo -n. The follow-up chmod 0644 lets
+      # the non-root `docker compose` READ the env_file — safe HERE
+      # because the values are dummy literals, not secrets; the 0600
+      # contract applies to the real prod env on the VPS.
       - name: Render dummy env at canonical path (render-env.sh)
         run: |
-          mkdir -p /opt/memo/env
-          bash deploy/render-env.sh <<EOF
+          sudo -n mkdir -p /opt/memo/env
+          sudo -n bash deploy/render-env.sh <<EOF
           ENV=production
           SECRET_KEY=$(openssl rand -hex 32)
           OTP_PEPPER=$(openssl rand -hex 32)
           DATABASE_URL=sqlite+aiosqlite:////opt/memo/data/memo.db
           FILES_DIR=/opt/memo/media
           EOF
+          sudo -n chmod 0644 /opt/memo/env/production.env
           if [ ! -f /opt/memo/env/production.env ]; then
             echo "ERROR: canonical env file missing after render"
             exit 1
@@ -738,7 +743,7 @@ jobs:
       - name: Health checks through edge (health, SPA, admin)
         run: |
           wait_for() { # wait_for <url> <label>
-            local url=$1 label=$2 i code=000
+            local url=$1 label=$2 code=000
             echo "Waiting for $label at $url ..."
             for i in $(seq 1 120); do
               code=$(curl -s -o /dev/null -w "%{http_code}" "$url" --max-time 30 2>/dev/null || echo "000")

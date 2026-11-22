@@ -567,12 +567,18 @@ jobs:
   # files, GHA cache scopes) minus push — `load: true` puts the images
   # into the runner's docker image store for the run phase. Run phase =
   # deploy/docker-compose.prod.yml + an inline throwaway override that
-  # swaps the VPS env/volume contract (spec §3.3) for runner-temp paths
-  # (the compose env_file is deliberately STRING form so the override
-  # replaces it wholesale). Health checks from the runner host — curl is
-  # present on the runner, unlike inside the slim images. Ports stay the
-  # compose loopback ones (8000/3000/8080), disjoint from the e2e shards
-  # (3002–3006/8001–8005); every job runs on its own runner VM anyway.
+  # redirects the volume binds to runner-temp paths and swaps edge to
+  # the TLS-less deploy/nginx.smoke.conf. Env: rendered at the CANONICAL
+  # path via deploy/render-env.sh — the override does not touch env_file
+  # at all (owner fix: compose UNION-merges env_file across files, so an
+  # override can never replace /opt/memo/env/production.env; the base
+  # env_file must simply find a file there).
+  #
+  # All checks go THROUGH edge, plain http — the only published service,
+  # one port (${SMOKE_EDGE_PORT:-8080}:80): /api/v1/health proves the
+  # full nginx->backend->DB chain, / the static SPA, /admin the admin
+  # shell. backend/admin publish nothing (topology §3.2) — no
+  # per-service loopback probes.
   #
   # Alembic migrations ARE run here, at deploy.sh ordering (BEFORE
   # `up -d`, spec §3.2/§4.2): alembic/env.py consumes DATABASE_URL, so
@@ -620,62 +626,98 @@ jobs:
           cache-from: type=gha,scope=memo-admin
           cache-to: type=gha,mode=max,scope=memo-admin
 
-      - name: Build web image (no push)
+      - name: Build edge image (no push)
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: deploy/Dockerfile.web
+          file: deploy/Dockerfile.edge
           push: false
           load: true
-          tags: memo-web:pr-smoke
-          cache-from: type=gha,scope=memo-web
-          cache-to: type=gha,mode=max,scope=memo-web
+          tags: memo-edge:pr-smoke
+          cache-from: type=gha,scope=memo-edge
+          cache-to: type=gha,mode=max,scope=memo-edge
 
-      # Throwaway stand-in for the VPS env contract (spec §3.3): random
-      # one-shot secrets — ENV=production fails fast on an empty
-      # SECRET_KEY/OTP_PEPPER, so the smoke exercises that fail-fast path
-      # for free — plus temp data/files dirs. chmod 0777: the backend
-      # container writes as uid 1001; the mode makes the smoke agnostic
-      # of the runner user's uid. (No job-level SMOKE_DIR env: the
-      # runner context is not allowed there — every step derives it from
-      # RUNNER_TEMP instead.)
-      - name: Write throwaway env + compose override
+      # Owner fix (spec §4.2 rev.6): compose UNION-merges env_file lists
+      # across merged files, so an override can NEVER take over the base
+      # /opt/memo/env/production.env — the canonical path itself must
+      # have a file. Render it with dummy literals via
+      # deploy/render-env.sh (one-shot openssl secrets; ENV=production
+      # also exercises the fail-fast on empty SECRET_KEY/OTP_PEPPER for
+      # free). Unquoted heredoc so $(openssl …) evaluates BEFORE the
+      # pipe; render-env.sh never echoes values and neither does this
+      # step (no set -x). The runner user is root and render-env.sh
+      # mkdir -p's the dir itself — the mkdir here is belt and braces.
+      - name: Render dummy env at canonical path (render-env.sh)
+        run: |
+          mkdir -p /opt/memo/env
+          bash deploy/render-env.sh <<EOF
+          ENV=production
+          SECRET_KEY=$(openssl rand -hex 32)
+          OTP_PEPPER=$(openssl rand -hex 32)
+          DATABASE_URL=sqlite+aiosqlite:////opt/memo/data/memo.db
+          FILES_DIR=/opt/memo/media
+          EOF
+          if [ ! -f /opt/memo/env/production.env ]; then
+            echo "ERROR: canonical env file missing after render"
+            exit 1
+          fi
+          echo "Canonical env rendered: /opt/memo/env/production.env"
+
+      # Throwaway stand-in for the VPS volume contract (spec §3.3): the
+      # backend container writes as uid 1001 (data + media root), so the
+      # smoke subtrees get 0777 — agnostic of the runner user's uid.
+      # media/public must exist as the edge ro-mount bind source (the
+      # override carries that mount because the base
+      # /opt/memo/media/public will not exist here). No job-level
+      # SMOKE_DIR env (runner context is not allowed there) — every step
+      # derives it from RUNNER_TEMP instead.
+      - name: Prepare smoke dirs and compose override
         run: |
           SMOKE_DIR="$RUNNER_TEMP/memo-prod-smoke"
-          mkdir -p "$SMOKE_DIR/data" "$SMOKE_DIR/files"
-          chmod 0777 "$SMOKE_DIR/data" "$SMOKE_DIR/files"
+          mkdir -p "$SMOKE_DIR/data" "$SMOKE_DIR/media/public"
+          chmod -R 0777 "$SMOKE_DIR/data" "$SMOKE_DIR/media"
 
-          umask 077
-          {
-            echo "ENV=production"
-            echo "SECRET_KEY=$(openssl rand -hex 32)"
-            echo "OTP_PEPPER=$(openssl rand -hex 32)"
-            echo "DATABASE_URL=sqlite+aiosqlite:////opt/memo/data/memo.db"
-            echo "FILES_DIR=/opt/memo/files"
-          } > "$SMOKE_DIR/memo-smoke.env"
-
-          # Unquoted heredoc: $SMOKE_DIR expands into the paths (runner
-          # temp has no spaces). Image names mirror the tags built above.
+          # Unquoted heredoc: SMOKE_DIR / GITHUB_WORKSPACE / the port
+          # default expand into literal paths (runner temp has no
+          # spaces). Image names mirror the tags built above.
+          #
+          # backend/admin: image + (backend) redirected volume binds
+          # ONLY — no ports, no env_file key: the canonical env file
+          # rendered above IS the base env_file; substituting env_file
+          # here is exactly the union-merge bug this job survived.
+          #
+          # edge !override lists (compose v2.24+) REPLACE the base ones
+          # wholesale: volumes drop the certs/acme binds (nginx.smoke.conf
+          # is TLS-less) and re-point media-public at the smoke dir;
+          # ports collapse to ONE published edge port. nginx.smoke.conf
+          # is bound via the ABSOLUTE $GITHUB_WORKSPACE path — compose
+          # resolves relative bind sources against the override file's
+          # dir ($RUNNER_TEMP), not the checkout.
           cat > "$SMOKE_DIR/override.yml" <<YAML
           services:
             backend:
               image: memo-backend:pr-smoke
-              env_file: ${SMOKE_DIR}/memo-smoke.env
               volumes:
                 - ${SMOKE_DIR}/data:/opt/memo/data
-                - ${SMOKE_DIR}/files:/opt/memo/files
+                - ${SMOKE_DIR}/media:/opt/memo/media
             admin:
               image: memo-admin:pr-smoke
-            web:
-              image: memo-web:pr-smoke
+            edge:
+              image: memo-edge:pr-smoke
+              volumes: !override
+                - ${SMOKE_DIR}/media/public:/var/www/media-public:ro
+                - ${GITHUB_WORKSPACE}/deploy/nginx.smoke.conf:/etc/nginx/conf.d/default.conf:ro
+              ports: !override
+                - "${SMOKE_EDGE_PORT:-8080}:80"
           YAML
 
       # deploy.sh §"migrations BEFORE up -d" — same leg, same ordering
       # here: the stack starts only against a migrated schema. The
-      # compose `run` inherits the backend env_file (DATABASE_URL →
-      # /opt/memo/data/memo.db = the volume-mounted runner temp dir), so
-      # this step is the live CI proof of the env.py DATABASE_URL fix.
-      # -T: no TTY on the runner (deploy.sh precedent over ssh).
+      # compose `run` inherits the backend env_file (the canonical file
+      # rendered above; DATABASE_URL → /opt/memo/data/memo.db = the
+      # volume-mounted runner temp dir), so this step is the live CI
+      # proof of the env.py DATABASE_URL fix. -T: no TTY on the runner
+      # (deploy.sh precedent over ssh).
       - name: Run alembic migrations (before up -d)
         run: |
           SMOKE_DIR="$RUNNER_TEMP/memo-prod-smoke"
@@ -688,9 +730,12 @@ jobs:
           docker compose -f deploy/docker-compose.prod.yml \
             -f "$SMOKE_DIR/override.yml" up -d
 
-      # Strict 2xx on all three loopback endpoints; the wait-loop shape
-      # mirrors the e2e jobs (120 × 1s polls, curl --max-time).
-      - name: Health checks (backend /api/v1/health, admin /admin, web /)
+      # Strict 2xx through edge, plain http (nginx.smoke.conf): the
+      # health probe exercises the full nginx->backend->DB chain, / the
+      # static SPA baked into the edge image, /admin the admin shell
+      # behind edge. The wait-loop shape mirrors the e2e jobs (120 × 1s
+      # polls, curl --max-time).
+      - name: Health checks through edge (health, SPA, admin)
         run: |
           wait_for() { # wait_for <url> <label>
             local url=$1 label=$2 i code=000
@@ -706,9 +751,10 @@ jobs:
             echo "ERROR: $label did not answer 2xx at $url within 120s (last HTTP $code)"
             return 1
           }
-          wait_for http://127.0.0.1:8000/api/v1/health "backend /api/v1/health"
-          wait_for http://127.0.0.1:3000/admin "admin /admin"
-          wait_for http://127.0.0.1:8080/ "web /"
+          EDGE_URL="http://127.0.0.1:${SMOKE_EDGE_PORT:-8080}"
+          wait_for "$EDGE_URL/api/v1/health" "edge /api/v1/health (nginx->backend->DB)"
+          wait_for "$EDGE_URL/" "edge / (static SPA)"
+          wait_for "$EDGE_URL/admin" "edge /admin (admin shell)"
 
       - name: Dump container logs
         if: failure()
@@ -717,10 +763,11 @@ jobs:
           docker compose -f deploy/docker-compose.prod.yml \
             -f "$SMOKE_DIR/override.yml" logs --no-color --tail 200 || true
 
-      - name: Teardown (compose down -v)
+      - name: Teardown (compose down -v, remove temp dir)
         if: always()
         run: |
           SMOKE_DIR="$RUNNER_TEMP/memo-prod-smoke"
           docker compose -f deploy/docker-compose.prod.yml \
-            -f "$SMOKE_DIR/override.yml" down -v
+            -f "$SMOKE_DIR/override.yml" down -v --remove-orphans
+          rm -rf "$SMOKE_DIR"
 

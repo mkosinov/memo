@@ -71,6 +71,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     репозитория `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/`DEPLOY_SSH_KEY`,
     опционально `REGISTRY_TOKEN` и `vars.REGISTRY_PREFIX`.
   - Status: `docs/status/2026-11-22-prod-deploy-616.md`
+- **GH #612 — Предзагрузка прода: загрузчик читает CSV владельца
+  напрямую (`--csv`), YAML-вход упразднён, CSV-шаблон-инструкция
+  в репо** — branch `612-prod-seed-csv-loader` (5 задач, 7 коммитов
+  `9b57e86c..473cec23`, base `d33acc1d` = main после #599; 15 файлов,
+  +2382/−1010; спека
+  `docs/specs/2026-11-13-prod-seed-csv-loader-612-design.md` рев.2
+  (`c2fd1cce`) и план
+  `docs/plans/2026-11-13-prod-seed-csv-loader-612-plan.md` 5/5
+  (`697afb55`) — оба на main, unchanged by IMPL):
+  - **CSV-парсер (T1 `9b57e86c`+`4854355e`+`8c2589c4`, large):**
+    чтение `utf-8-sig` (BOM±) + `csv.reader(strict=True)` с номерами
+    строк начала записи (многострочные кавычки); автомат секций
+    (маркер→шапка→данные; повтор/неизвестная → ошибка, порядок
+    свободный); шапка поимённо — нет колонки → ошибка, лишняя →
+    предупреждение «секция + колонка», дубль → ошибка; типизация
+    у источника (int: «пустая → null» только для `max_age`/
+    `sort_order`; bool; `audience` ∈ kid/adult/all; lax pydantic
+    не задействован); групповые правила master_* (частичное
+    заполнение → явная ошибка); мультизначения через `;`;
+    вложение materials/tariffs по `service_title`; секция
+    `specialty` — плоский список без шапки (пост-#599 контракт
+    §4.8); `tags` опциональна; ошибки — `SeedDataError` «строка N»
+    на русском.
+  - **Кросс-валидация + направления (T2 `f2f45dd7`):** вся
+    существующая проверочная логика сохранена + новая кросс-
+    проверка `staff.positions` → секция `positions` на этапе
+    `--check` (зеркало текста слоя записи); specialty-ссылки
+    (`services.specialty`, `staff.master_specialty`) с резолвом
+    по `lower(title)`, неизвестное название → ошибка с именем
+    значения; D5-гвард живого master-блока; тексты «файл YAML» →
+    «строка N CSV».
+  - **CLI `--csv` (T3 `5bd768b8`):** `--csv <файл>` — обязательный
+    аргумент (`--dir` удалён); `--check`/`--dry-run`
+    взаимоисключающие (совместно → exit 2); коды выхода 0/1/2;
+    несуществующий путь/файл без секций → внятная ошибка, exit 1.
+  - **Тесты слоя на CSV-фикстуры (T4 `cd749d8e`):** дубликаты
+    natural keys, `max_age < min_age`, цвет `#RRGGBB`, точная
+    синхронизация связей, одна транзакция + rollback,
+    идемпотентность перезаливки, встроенные должности — ассерты
+    поведения нетронуты, тексты сообщений под CSV; тег-семантика
+    §4.7 (пустые тег-колонки → связи очищаются, сущности-теги
+    живут); `is_public` обеих полярностей; контроль
+    `load_reference_data(DEFAULT_DIR)` упразднён.
+  - **Шаблон/README/зачистка (T5 `473cec23`):** `prod-seed-template.csv`
+    — полная геометрия §4.2 с выдуманными данными, fixture-тест
+    §6 № 8 («шаблон всегда валиден»); README переписан (поток
+    `--csv` → `--check` → `--dry-run` → заливка, коды выхода,
+    механика файла, таблицы полей, master_*, §4.7, `create-user`);
+    удалены 6 YAML-шаблонов (вкл. `specialties.yaml` #599);
+    `pyyaml`/`types-PyYAML` сняты (остаточный lock-пакет —
+    transitive `uvicorn[standard]`); `.gitignore` —
+    `backend/seed-data/*.csv` c `!prod-seed-template.csv` (ПДн
+    владельца); дом-правила `specialties.md` — сид-раздел на
+    CSV-вход.
+  - Tests: backend pytest полный **4546 passed / 0 failed /
+    92 skipped** (0:32:17, точное финальное дерево); сид-сьюты
+    **100/100**; ruff чистый; `uv lock --check` зелёный; visual
+    gate **N/A** (CLI-утилита, exit 0); контрольный прогон на
+    реальном CSV владельца — по дизайну вручную на машине
+    владельца (ПДн не входит в репо). Тест-матрица спеки §6
+    № 1–12 покрыта полностью.
+  - Status: `docs/status/2026-11-22-prod-seed-csv-loader-612.md`
 
 ## [Unreleased] — 2026-11-21
 

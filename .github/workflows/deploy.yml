@@ -30,7 +30,9 @@
 # — see the `render prod env` step): the deploy job forwards them to
 # render-env.sh over ssh stdin — never argv, never disk on the runner —
 # which renders /opt/memo/env/production.env on the VPS (atomic, 0600).
-# GITHUB_TOKEN (packages: write) pushes the images in `build`.
+# REGISTRY_TOKEN likewise reaches the deploy invocation only via ssh stdin
+# (consumed remotely via `$(cat)` into the environment) — never in any
+# argv. GITHUB_TOKEN (packages: write) pushes the images in `build`.
 
 name: Deploy
 
@@ -60,7 +62,10 @@ jobs:
     steps:
       # Single source of truth for the tag: release event first, dispatch
       # input second. Fails closed when both are empty (misconfigured
-      # dispatch) instead of silently building some random ref.
+      # dispatch) instead of silently building some random ref. The charset
+      # check is an INJECTION guard: the tag is embedded (single-quoted)
+      # in the remote deploy command below — a quote in it would break out
+      # of the quoting and execute on the VPS.
       - name: Resolve release tag
         id: tag
         env:
@@ -70,6 +75,10 @@ jobs:
           tag="${RELEASE_TAG:-$INPUT_TAG}"
           if [ -z "$tag" ]; then
             echo "::error::No release tag: neither github.event.release.tag_name nor inputs.tag is set."
+            exit 1
+          fi
+          if [[ ! "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "::error::Invalid release tag '$tag': allowed charset is [A-Za-z0-9][A-Za-z0-9._-]* (the tag is embedded in the remote deploy command)."
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -92,6 +101,12 @@ jobs:
           prefix="${prefix%/}"
           if [ -z "$prefix" ] || [ "$prefix" = "${prefix#*/}" ]; then
             echo "::error::Registry prefix must be <host>/<namespace>, got '$prefix'."
+            exit 1
+          fi
+          # Injection guard, same as the tag: the prefix is embedded in
+          # the remote deploy command below.
+          if [[ ! "$prefix" =~ ^[a-z0-9./_-]+$ ]]; then
+            echo "::error::Invalid registry prefix '$prefix': allowed charset is [a-z0-9./_-]."
             exit 1
           fi
           {
@@ -287,8 +302,10 @@ jobs:
       #   MEMO_REGISTRY_PREFIX  compose image namespace (same default as
       #                         compose itself)
       #   REGISTRY_TOKEN        optional; non-empty → docker login to pull
-      #                         PRIVATE images; empty → no login. deploy.sh
-      #                         must never echo it.
+      #                         PRIVATE images; empty → no login. Piped over
+      #                         ssh STDIN (consumed remotely by $(cat) into
+      #                         the env) — never in any argv. deploy.sh must
+      #                         never echo it.
       #
       # deploy.sh must (spec §4.2): pull the 3 tagged images (backend,
       # admin, edge), run `docker compose run --rm backend alembic upgrade
@@ -299,6 +316,16 @@ jobs:
       # (§4.3).
       - name: Run deploy.sh on the VPS
         run: |
-          ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
-            "$SSH_USER@$SSH_HOST" \
-            "cd /opt/memo/deploy && chmod +x deploy.sh && MEMO_IMAGE_TAG='$DEPLOY_TAG' MEMO_REGISTRY_PREFIX='$MEMO_REGISTRY_PREFIX' REGISTRY_TOKEN='$REGISTRY_TOKEN' ./deploy.sh '$DEPLOY_TAG'"
+          # REGISTRY_TOKEN travels over ssh STDIN: the remote command
+          # contains only the LITERAL `REGISTRY_TOKEN="$(cat)"` — the
+          # command substitution runs on the REMOTE shell, consuming our
+          # stdin into the env var. The token never appears in any argv:
+          # not in the local ssh argv, not in the remote sh -c string —
+          # invisible to `ps` on either side. DEPLOY_TAG and
+          # MEMO_REGISTRY_PREFIX stay inline (single-quoted in the remote
+          # string): both are charset-validated in the resolve steps
+          # (build job), so a value cannot break out of the quoting.
+          remote_cmd="cd /opt/memo/deploy && chmod +x deploy.sh && REGISTRY_TOKEN=\"\$(cat)\""
+          remote_cmd+=" MEMO_IMAGE_TAG='$DEPLOY_TAG' MEMO_REGISTRY_PREFIX='$MEMO_REGISTRY_PREFIX' ./deploy.sh '$DEPLOY_TAG'"
+          printf '%s' "$REGISTRY_TOKEN" | ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" "$remote_cmd"

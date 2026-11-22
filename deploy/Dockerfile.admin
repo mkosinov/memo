@@ -20,8 +20,9 @@
 #     server entry is frontend/admin/server.js, not a root server.js;
 #   - HOSTNAME=0.0.0.0 — standalone server.js binds process.env.HOSTNAME;
 #     without it the container only listens on loopback inside its netns;
-#   - port 3000, published to host loopback only by compose (spec §3.2) —
-#     public exposure/SSL belongs to the host nginx (#617).
+#   - port 3000, NOTHING published to the host (spec §3.2): edge proxies
+#     /admin → admin:3000 over the compose network — public exposure and
+#     TLS belong to edge (nginx.conf), not to this image.
 
 # ---- Build stage: full workspace toolchain, discarded afterwards ----------
 FROM node:26-alpine AS build

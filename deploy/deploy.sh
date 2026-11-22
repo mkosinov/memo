@@ -36,14 +36,16 @@
 #
 # Operator pre-reqs (deploy/Dockerfile.backend header, runbook #619):
 #   /opt/memo/env/production.env, /opt/memo/data, /opt/memo/media exist;
-#   the two volume dirs chowned 1001:1001 (SQLite WAL in data/; avatar
-#   writes at the media volume ROOT — root-owned mount points die as
-#   EACCES).
+#   the edge bind sources /opt/memo/{media/public,acme,certs} (+ the TLS
+#   pair in certs/, issued by #617) exist; the two volume dirs chowned
+#   1001:1001 (SQLite WAL in data/; avatar writes at the media volume
+#   ROOT — root-owned mount points die as EACCES).
 #
 # Exit codes (single canon — a health failure is NOT a migration failure):
 #   0  success — stack up + /api/v1/health answered 2xx
 #   1  usage / preflight — bad tag, compose CLI missing, python3 missing,
-#      operator pre-req paths absent
+#      operator pre-req paths absent (env file, volume dirs, edge bind
+#      sources / TLS pair)
 #   2  migration failure (alembic upgrade head) — stack NOT started; the
 #      previous release keeps running untouched
 #   3  health timeout — stack is UP but never answered 2xx in time;
@@ -113,8 +115,15 @@ HEALTH_TIMEOUT_SECONDS=${HEALTH_TIMEOUT_SECONDS:-120}
 # ── preflight: operator pre-reqs ───────────────────────────────────────────
 command -v python3 >/dev/null 2>&1 \
   || die 1 "python3 not found on the host — the health probe needs it (no curl in the images)"
-for path in /opt/memo/env/production.env /opt/memo/data /opt/memo/media; do
+for path in /opt/memo/env/production.env /opt/memo/data /opt/memo/media \
+            /opt/memo/media/public /opt/memo/acme /opt/memo/certs; do
   [ -e "$path" ] || die 1 "missing $path — operator pre-req (deploy/Dockerfile.backend header, runbook #619)"
+done
+# Edge bind sources (compose mounts, spec §3.2): compose would silently
+# create_host_path a missing dir as ROOT-owned → an opaque exit-3 health
+# timeout later (nginx without certs refuses to start). Fail clean HERE.
+for cert in /opt/memo/certs/fullchain.pem /opt/memo/certs/privkey.pem; do
+  [ -f "$cert" ] || die 1 "missing $cert — TLS cert pair (compose/nginx mount contract; issued by #617)"
 done
 # uid-1001 ownership is a WARNING, not an error: a remapped-uid setup
 # (Dockerfile.backend header) is legitimate; a forgotten chown on a stock

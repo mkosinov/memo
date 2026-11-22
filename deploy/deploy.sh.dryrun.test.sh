@@ -13,9 +13,10 @@
 #     propagation into compose (tag=<tag> in the journal)
 #
 # Staging note: deploy.sh preflight-checks the absolute VPS paths
-# /opt/memo/env/production.env (fixture created by earlier #616 tasks) and
-# /opt/memo/{data,media}. This test creates the two volume dirs when absent
-# and removes ONLY what it created.
+# /opt/memo/env/production.env (fixture created by earlier #616 tasks),
+# /opt/memo/{data,media} and the edge bind sources
+# /opt/memo/{media/public,acme,certs} (+ the TLS pair inside certs/).
+# This test creates whatever is missing and removes ONLY what it created.
 #
 # Run: bash deploy/deploy.sh.dryrun.test.sh
 
@@ -37,14 +38,27 @@ if [ ! -f /opt/memo/env/production.env ]; then
   echo "SKIP: /opt/memo/env/production.env fixture missing (earlier #616 task creates it)." >&2
   exit 0
 fi
-created_data=0 created_media=0
+created_data=0 created_media=0 created_media_public=0 created_acme=0 created_certs=0
 if [ ! -d /opt/memo/data ]; then mkdir -p /opt/memo/data; created_data=1; fi
 if [ ! -d /opt/memo/media ]; then mkdir -p /opt/memo/media; created_media=1; fi
+if [ ! -d /opt/memo/media/public ]; then mkdir -p /opt/memo/media/public; created_media_public=1; fi
+if [ ! -d /opt/memo/acme ]; then mkdir -p /opt/memo/acme; created_acme=1; fi
+# certs: dummy pair — deploy.sh only checks existence (-f), never parses.
+if [ ! -d /opt/memo/certs ]; then
+  mkdir -p /opt/memo/certs
+  : > /opt/memo/certs/fullchain.pem
+  : > /opt/memo/certs/privkey.pem
+  created_certs=1
+fi
 
 cleanup() {
   rm -rf "$WORK"
-  # Restore the moved-aside fixture dir first (case 9 dies mid-run).
+  # Restore the moved-aside fixture dirs first (case 9/12 die mid-run).
   if [ -d /opt/memo/media.dryrun-held ]; then mv /opt/memo/media.dryrun-held /opt/memo/media; fi
+  if [ -d /opt/memo/certs.dryrun-held ]; then mv /opt/memo/certs.dryrun-held /opt/memo/certs; fi
+  if [ "$created_certs" = 1 ] && [ -d /opt/memo/certs ]; then rm -rf /opt/memo/certs; fi
+  if [ "$created_acme" = 1 ] && [ -d /opt/memo/acme ]; then rm -rf /opt/memo/acme; fi
+  if [ "$created_media_public" = 1 ] && [ -d /opt/memo/media/public ]; then rm -rf /opt/memo/media/public; fi
   if [ "$created_media" = 1 ] && [ -d /opt/memo/media ]; then rm -rf /opt/memo/media; fi
   if [ "$created_data" = 1 ] && [ -d /opt/memo/data ]; then rm -rf /opt/memo/data; fi
 }
@@ -268,6 +282,14 @@ assert_rc 0
 j_has '^LOGIN host=ghcr.io user=acme token=tok$'
 j_has '^PULL ghcr.io/acme/memo/backend:v1.0.0$'
 unset REGISTRY_TOKEN MEMO_REGISTRY_PREFIX
+
+# ── case 12: preflight — missing edge bind source → exit 1 ──────────────────
+echo '== case 12: missing /opt/memo/certs → exit 1 (preflight) =='
+mv /opt/memo/certs /opt/memo/certs.dryrun-held
+run_deploy "$WORK/tree/deploy" v9.9.9
+assert_rc 1
+out_has '/opt/memo/certs'
+mv /opt/memo/certs.dryrun-held /opt/memo/certs
 
 # ── summary ────────────────────────────────────────────────────────────────
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

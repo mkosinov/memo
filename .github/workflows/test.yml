@@ -556,3 +556,155 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+
+  # GH #616 (spec §4.2, §7 scenario 5): prod-build guard on every PR —
+  # build the 3 prod images WITHOUT pushing and actually RUN the stack:
+  # building alone is not enough (a standalone image missing its copied
+  # assets builds fine but does not serve), so a broken image must go
+  # red here BEFORE the merge, not at the next release deploy.
+  #
+  # Build phase = the deploy.yml `build` steps verbatim (same contexts,
+  # files, GHA cache scopes) minus push — `load: true` puts the images
+  # into the runner's docker image store for the run phase. Run phase =
+  # deploy/docker-compose.prod.yml + an inline throwaway override that
+  # swaps the VPS env/volume contract (spec §3.3) for runner-temp paths
+  # (the compose env_file is deliberately STRING form so the override
+  # replaces it wholesale). Health checks from the runner host — curl is
+  # present on the runner, unlike inside the slim images. Ports stay the
+  # compose loopback ones (8000/3000/8080), disjoint from the e2e shards
+  # (3002–3006/8001–8005); every job runs on its own runner VM anyway.
+  #
+  # Alembic migrations are deliberately NOT run here: /api/v1/health
+  # answers 200 without a migrated schema (SELECT 1 only), and the
+  # migration path is covered by the §5 local smoke instead.
+  prod-build:
+    name: Prod build smoke (3 images, no push)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # The base compose file interpolates ${MEMO_IMAGE_TAG:?} per-file,
+      # BEFORE the override replaces image: — without this export the
+      # compose commands below die at interpolation. Any non-empty value
+      # works; the real image names come from the override.
+      MEMO_IMAGE_TAG: pr-smoke
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: deploy/Dockerfile.backend
+          push: false
+          load: true
+          tags: memo-backend:pr-smoke
+          cache-from: type=gha,scope=memo-backend
+          cache-to: type=gha,mode=max,scope=memo-backend
+
+      - name: Build admin image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.admin
+          push: false
+          load: true
+          tags: memo-admin:pr-smoke
+          cache-from: type=gha,scope=memo-admin
+          cache-to: type=gha,mode=max,scope=memo-admin
+
+      - name: Build web image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.web
+          push: false
+          load: true
+          tags: memo-web:pr-smoke
+          cache-from: type=gha,scope=memo-web
+          cache-to: type=gha,mode=max,scope=memo-web
+
+      # Throwaway stand-in for the VPS env contract (spec §3.3): random
+      # one-shot secrets — ENV=production fails fast on an empty
+      # SECRET_KEY/OTP_PEPPER, so the smoke exercises that fail-fast path
+      # for free — plus temp data/files dirs. chmod 0777: the backend
+      # container writes as uid 1001; the mode makes the smoke agnostic
+      # of the runner user's uid. (No job-level SMOKE_DIR env: the
+      # runner context is not allowed there — every step derives it from
+      # RUNNER_TEMP instead.)
+      - name: Write throwaway env + compose override
+        run: |
+          SMOKE_DIR="$RUNNER_TEMP/memo-prod-smoke"
+          mkdir -p "$SMOKE_DIR/data" "$SMOKE_DIR/files"
+          chmod 0777 "$SMOKE_DIR/data" "$SMOKE_DIR/files"
+
+          umask 077
+          {
+            echo "ENV=production"
+            echo "SECRET_KEY=$(openssl rand -hex 32)"
+            echo "OTP_PEPPER=$(openssl rand -hex 32)"
+            echo "DATABASE_URL=sqlite+aiosqlite:////opt/memo/data/memo.db"
+            echo "FILES_DIR=/opt/memo/files"
+          } > "$SMOKE_DIR/memo-smoke.env"
+
+          # Unquoted heredoc: $SMOKE_DIR expands into the paths (runner
+          # temp has no spaces). Image names mirror the tags built above.
+          cat > "$SMOKE_DIR/override.yml" <<YAML
+          services:
+            backend:
+              image: memo-backend:pr-smoke
+              env_file: ${SMOKE_DIR}/memo-smoke.env
+              volumes:
+                - ${SMOKE_DIR}/data:/opt/memo/data
+                - ${SMOKE_DIR}/files:/opt/memo/files
+            admin:
+              image: memo-admin:pr-smoke
+            web:
+              image: memo-web:pr-smoke
+          YAML
+
+      - name: Start the stack (compose up -d)
+        run: |
+          SMOKE_DIR="$RUNNER_TEMP/memo-prod-smoke"
+          docker compose -f deploy/docker-compose.prod.yml \
+            -f "$SMOKE_DIR/override.yml" up -d
+
+      # Strict 2xx on all three loopback endpoints; the wait-loop shape
+      # mirrors the e2e jobs (120 × 1s polls, curl --max-time).
+      - name: Health checks (backend /api/v1/health, admin /admin, web /)
+        run: |
+          wait_for() { # wait_for <url> <label>
+            local url=$1 label=$2 i code=000
+            echo "Waiting for $label at $url ..."
+            for i in $(seq 1 120); do
+              code=$(curl -s -o /dev/null -w "%{http_code}" "$url" --max-time 30 2>/dev/null || echo "000")
+              if echo "$code" | grep -qE "^2"; then
+                echo "$label ready (HTTP $code)"
+                return 0
+              fi
+              sleep 1
+            done
+            echo "ERROR: $label did not answer 2xx at $url within 120s (last HTTP $code)"
+            return 1
+          }
+          wait_for http://127.0.0.1:8000/api/v1/health "backend /api/v1/health"
+          wait_for http://127.0.0.1:3000/admin "admin /admin"
+          wait_for http://127.0.0.1:8080/ "web /"
+
+      - name: Dump container logs
+        if: failure()
+        run: |
+          SMOKE_DIR="$RUNNER_TEMP/memo-prod-smoke"
+          docker compose -f deploy/docker-compose.prod.yml \
+            -f "$SMOKE_DIR/override.yml" logs --no-color --tail 200 || true
+
+      - name: Teardown (compose down -v)
+        if: always()
+        run: |
+          SMOKE_DIR="$RUNNER_TEMP/memo-prod-smoke"
+          docker compose -f deploy/docker-compose.prod.yml \
+            -f "$SMOKE_DIR/override.yml" down -v
+

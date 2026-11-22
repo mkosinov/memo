@@ -1,0 +1,92 @@
+# Production compose stack (GH #616, spec §3.2–3.3).
+#
+# Deployed by the release workflow (spec §4.2): deploy.sh is scp'ed to the VPS
+# together with this file and runs the steps below. Two interpolation variables:
+#
+#   MEMO_IMAGE_TAG        REQUIRED — release tag (deploy.sh <tag>); one tag for
+#                         all three images (release = one tag = one rollout).
+#                         Required, not defaulted: a deploy must never silently
+#                         fall back to `latest` (rollback = dispatch with the
+#                         previous tag, spec §4.3).
+#   MEMO_REGISTRY_PREFIX  optional — registry namespace, default
+#                         ghcr.io/mkosinov/memo (GHCR path of this repo);
+#                         override for a mirror or private registry.
+#
+# Images are PULLED here, never built (§4.2 builds them in CI): no `build:`
+# sections and therefore no build args — the only public build-time values
+# (relative /api, /admin basePath) are baked in the Dockerfiles (spec §3.3).
+# Application secrets arrive exclusively via env_file at runtime and never
+# enter image layers.
+#
+# Migrations are NOT an entrypoint (spec §3.2): deploy.sh runs the explicit
+# step BEFORE `up -d`:
+#   docker compose run --rm backend alembic upgrade head
+#
+# Local smoke (spec §5) swaps env_file/volumes via a second `-f` override file.
+# env_file is deliberately STRING form: an override REPLACES a string, while a
+# list would append — and then fail on the missing server env file.
+#
+# No `version:` key — deprecated and ignored by Compose v2.
+#
+# The notification stack (dispatcher/worker/relay) is intentionally absent
+# (spec §3.2): the subsystem is off at launch and ships with its own card.
+
+services:
+  backend:
+    image: ${MEMO_REGISTRY_PREFIX:-ghcr.io/mkosinov/memo}/backend:${MEMO_IMAGE_TAG:?MEMO_IMAGE_TAG must be set to the release tag}
+    # Server env contract (spec §3.3): /opt/memo/env/production.env on the VPS,
+    # root:root 0600, never committed. String form — see the file header.
+    env_file: /opt/memo/env/production.env
+    ports:
+      - "127.0.0.1:8000:8000" # loopback only; public exposure/SSL = host nginx (#617)
+    volumes:
+      # SQLite on a bind mount, no DB service (ADR-001): memo.db + -wal/-shm.
+      # Container path matches the spec env contract verbatim
+      # (DATABASE_URL=sqlite+aiosqlite:////opt/memo/data/memo.db), so the same
+      # env file shape works for the local smoke.
+      - /opt/memo/data:/opt/memo/data
+      # Uploads/avatars (FILES_DIR=/opt/memo/files in the env contract).
+      - /opt/memo/files:/opt/memo/files
+    # SIGTERM reaches uvicorn directly (PID 1 via `exec` in the image): it
+    # drains connections and exits; the window covers the SQLite WAL
+    # checkpoint on stop (spec §3.2).
+    stop_grace_period: 30s
+    # No curl in the slim image (spec §3.2): python one-liner probes the
+    # health endpoint — non-2xx or timeout raises → non-zero exit.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  admin:
+    image: ${MEMO_REGISTRY_PREFIX:-ghcr.io/mkosinov/memo}/admin:${MEMO_IMAGE_TAG:?MEMO_IMAGE_TAG must be set to the release tag}
+    environment:
+      # Next standalone server.js binds process.env.HOSTNAME (image sets it
+      # too); re-pinned here so the runtime requirement is visible at the
+      # service definition.
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "127.0.0.1:3000:3000" # loopback only; host nginx routes /admin (#617)
+    restart: unless-stopped
+
+  web:
+    image: ${MEMO_REGISTRY_PREFIX:-ghcr.io/mkosinov/memo}/web:${MEMO_IMAGE_TAG:?MEMO_IMAGE_TAG must be set to the release tag}
+    ports:
+      - "127.0.0.1:8080:8080" # loopback only; host nginx serves the site (#617)
+    restart: unless-stopped
+
+# The compose network gateway is a TRUST BOUNDARY for the backend (spec §3.1):
+# --forwarded-allow-ips defaults to 172.16.0.1 in Dockerfile.backend, and the
+# host nginx (#617) reaches the published loopback ports from exactly the
+# gateway address. Pin subnet + gateway so that default stays correct — with
+# the stock address pool the gateway would drift and uvicorn would stop
+# trusting the proxy headers (client IPs in the login-blocking ladder).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.16.0.0/24
+          gateway: 172.16.0.1

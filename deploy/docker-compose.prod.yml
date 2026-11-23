@@ -1,0 +1,147 @@
+# Production compose stack (GH #616, spec §3.2–3.3 rev.6).
+#
+# Topology (spec §3.2): `edge` — the only nginx (deploy/Dockerfile.edge +
+# nginx.conf) — is the SOLE public entry point and the only service with
+# `ports:` (80/443, plain host bindings: this container IS the front proxy,
+# nothing sits in front of it). backend and admin publish NOTHING: edge
+# reaches them over the compose network by service DNS name. The backend
+# trust boundary is edge's STATIC IP 172.16.0.10 (networks below), never a
+# wildcard.
+#
+# Deployed by the release workflow (spec §4.2): deploy.sh is scp'ed to the VPS
+# together with this file and runs the steps below. Two interpolation variables:
+#
+#   MEMO_IMAGE_TAG        REQUIRED — release tag (deploy.sh <tag>); one tag for
+#                         all three images (release = one tag = one rollout).
+#                         Required, not defaulted: a deploy must never silently
+#                         fall back to `latest` (rollback = dispatch with the
+#                         previous tag, spec §4.3).
+#   MEMO_REGISTRY_PREFIX  optional — registry namespace, default
+#                         ghcr.io/mkosinov/memo (GHCR path of this repo);
+#                         override for a mirror or private registry.
+#
+# Images are PULLED here, never built (§4.2 builds them in CI): no `build:`
+# sections and therefore no build args — the only public build-time values
+# (relative /api, /admin basePath) are baked in the Dockerfiles (spec §3.3).
+# Application secrets arrive exclusively via env_file at runtime and never
+# enter image layers.
+#
+# Migrations are NOT an entrypoint (spec §3.2): deploy.sh runs the explicit
+# step BEFORE `up -d`:
+#   docker compose run --rm backend alembic upgrade head
+#
+# Local smoke (spec §5): compose UNIONS `env_file` across merged files, so an
+# override alone cannot take over /opt/memo/env/production.env — the smoke
+# renders the canonical path itself via deploy/render-env.sh and strips this
+# line from its port-adapted copy.
+#
+# No `version:` key — deprecated and ignored by Compose v2.
+#
+# The notification stack (dispatcher/worker/relay) is intentionally absent
+# (spec §3.2): the subsystem is off at launch and ships with its own card.
+
+services:
+  edge:
+    image: ${MEMO_REGISTRY_PREFIX:-ghcr.io/mkosinov/memo}/edge:${MEMO_IMAGE_TAG:?MEMO_IMAGE_TAG must be set to the release tag}
+    # The public entry (topology note in the file header): 80 = ACME HTTP-01
+    # + redirect to https, 443 = TLS termination and the whole site
+    # (deploy/nginx.conf). Plain bindings, NOT loopback-bound — edge IS the
+    # front-facing proxy.
+    ports:
+      - "80:80"
+      - "443:443"
+    # Mount contract — EXACTLY what deploy/nginx.conf expects (its header):
+    # TLS certs and the ACME webroot are issued/renewed on the host by #617
+    # and mounted read-only here; without the certs the 443 server refuses
+    # to start (by design: prod runs only with real certs).
+    volumes:
+      - /opt/memo/certs:/etc/nginx/certs:ro
+      - /opt/memo/acme:/var/www/acme:ro
+      # Privacy boundary at the MOUNT level (spec §3.2 rev.6): only the
+      # public subtree of the single media volume is mounted — this
+      # container physically cannot serve anything else from /opt/memo/media,
+      # whatever a future config edit says. nginx location /images/public/
+      # aliases here; backend mounts the volume ROOT read-write (below).
+      - /opt/memo/media/public:/var/www/media-public:ro
+    # No healthcheck for edge in v1: no curl in nginx:alpine, no probe
+    # endpoint of its own; the backend healthcheck below covers the chain
+    # behind edge.
+    restart: unless-stopped
+    # Static IP — the backend's trust value (FORWARDED_ALLOW_IPS on the
+    # backend service; see the networks block at the bottom).
+    networks:
+      default:
+        ipv4_address: 172.16.0.10
+
+  backend:
+    image: ${MEMO_REGISTRY_PREFIX:-ghcr.io/mkosinov/memo}/backend:${MEMO_IMAGE_TAG:?MEMO_IMAGE_TAG must be set to the release tag}
+    # Server env contract (spec §3.3): /opt/memo/env/production.env on the VPS,
+    # root:root 0600, never committed; rendered by deploy/render-env.sh.
+    # String form — see the file header.
+    env_file: /opt/memo/env/production.env
+    # Trust boundary (spec §3.1), pinned in the open: uvicorn's
+    # --forwarded-allow-ips may name exactly ONE address — the edge
+    # service's STATIC IP (networks below), never a wildcard. The image
+    # bakes this value into the CLI flag, which always wins over the env
+    # var — and `environment:` here beats env_file, so production.env
+    # cannot retune it either. Uvicorn-native plural name. THREE places
+    # carry 172.16.0.10 and must stay in sync: this value, the edge
+    # networks.default.ipv4_address (edge service above), and the
+    # FORWARDED_ALLOW_IPS ARG default in deploy/Dockerfile.backend
+    # (deploy.sh/docs describe the value, they do not set it).
+    environment:
+      FORWARDED_ALLOW_IPS: "172.16.0.10"
+    # NO ports: edge proxies /api here by compose DNS name (backend:8000).
+    # The healthcheck below still probes 127.0.0.1:8000 INSIDE this
+    # container — that stays correct without any published port.
+    volumes:
+      # SQLite on a bind mount, no DB service (ADR-001): memo.db + -wal/-shm.
+      # Container path matches the spec env contract verbatim
+      # (DATABASE_URL=sqlite+aiosqlite:////opt/memo/data/memo.db), so the same
+      # env file shape works for the local smoke.
+      - /opt/memo/data:/opt/memo/data
+      # Single media volume, ROOT mounted rw (spec §3.2 rev.6):
+      # FILES_DIR=/opt/memo/media comes from the env contract; API uploads
+      # live in avatars/ under it; edge mounts ONLY public/ read-only (edge
+      # service above). Host ownership (uid 1001 image user): the operator
+      # chowns BOTH /opt/memo/data and /opt/memo/media — SQLite -wal/-shm
+      # and avatar writes run as uid 1001 and fail with EACCES on
+      # root-owned mount points.
+      - /opt/memo/media:/opt/memo/media
+    # SIGTERM reaches uvicorn directly (PID 1 via `exec` in the image): it
+    # drains connections and exits; the window covers the SQLite WAL
+    # checkpoint on stop (spec §3.2).
+    stop_grace_period: 30s
+    # No curl in the slim image (spec §3.2): python one-liner probes the
+    # health endpoint — non-2xx or timeout raises → non-zero exit.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  admin:
+    image: ${MEMO_REGISTRY_PREFIX:-ghcr.io/mkosinov/memo}/admin:${MEMO_IMAGE_TAG:?MEMO_IMAGE_TAG must be set to the release tag}
+    environment:
+      # Next standalone server.js binds process.env.HOSTNAME (image sets it
+      # too); re-pinned here so the runtime requirement is visible at the
+      # service definition.
+      HOSTNAME: "0.0.0.0"
+    # NO ports: edge proxies /admin here by compose DNS name (admin:3000).
+    restart: unless-stopped
+
+# Network (spec §3.2): the subnet is pinned so addresses never drift, and
+# edge holds the STATIC IP 172.16.0.10 — the backend's FORWARDED_ALLOW_IPS
+# trust value (backend service above, and the ARG default baked in
+# deploy/Dockerfile.backend). With the stock address pool both would drift
+# and uvicorn would stop trusting edge's proxy headers (client IPs feed the
+# login-blocking ladder). The gateway 172.16.0.1 stays the network's default
+# route and is NOT a trust address (round-1 trusted it — rev.6 fixes that).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.16.0.0/24
+          gateway: 172.16.0.1

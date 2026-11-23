@@ -10,6 +10,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-11-22
 
 ### Added
+- **GH #616 — Прод-деплой из main: релизы milestone → 3 образа (GHCR) →
+  VPS с откатом** — branch `616-prod-deploy`, открытый PR #629: раунд 1
+  (16 коммитов `436f5b0c..7430e1c1`, base `81d57172` = main; 29 файлов,
+  +2579/−22; спека рев.2) покраснил CI-чек «Prod build smoke»
+  (union-merge env_file в compose); владелец принял три решения —
+  спека переписана до рев.6, план переписан (оба на main); PR
+  переработан rework-раундом — 14 коммитов `6c60c467..73a61ecf`
+  поверх merge origin/main + docser-коммит мета-док (файлы rework:
+  `deploy/*`, `.github/workflows/{deploy,test}.yml`,
+  `scripts/prod-smoke.sh`, `.dockerignore`; инфраструктурная фича —
+  пользовательского поведения нет):
+  - **База волны (раунд 1, rework-ом не тронута):** прод-режим backend
+    — `ENV` `Literal["development","testing","production"]` с отказом
+    старта на неизвестном значении, sqladmin только по явному
+    `SQLADMIN_ENABLED` (дефолт OFF), WAL-прагмы пинами (T1
+    `436f5b0c`); admin `output: 'standalone'` + `basePath` от
+    `NEXT_PUBLIC_BASE_PATH`, относительный `NEXT_PUBLIC_API_URL=/api`
+    (`resolveApiUrl`; `images.unoptimized` условно на относительном
+    API-base) (T2 `78a191c6`); `deploy.sh` — login → pull → migrate →
+    up → health, канон кодов выхода 0–5; `scripts/release.sh` —
+    milestone closed-check → close → notes → `gh release create
+    --target main`, `--dry-run` (T5 `7430e1c1`); фикс `alembic/env.py`
+    потребляет `DATABASE_URL` (миграции бьют в смонтированную
+    прод-БД). Tests базы: backend unit прод-режима **14/14**, полный
+    сьют **4477 passed / 92 skipped / 0 failed**; api-client
+    **649/649**, скоуп admin **125/125**; release.sh dry-run на живом
+    milestone зелёный (23 issues).
+  - **`deploy/render-env.sh` (решение 1 — красный-чек-фикс):** env
+    рендерится из GitHub Secrets/job-переменных в канонический
+    `/opt/memo/env/production.env` — вход по stdin, атомарная запись,
+    права 0600, значения не печатаются; CRLF-толерантность, отказ на
+    пустом рендере. Им пользуются `deploy.yml`, CI-смоук и
+    `prod-smoke.sh`; `test.yml` рендерит литералы-пустышки в
+    канонический путь (sudo + 0644 — runner не root), env_file-
+    оверрайд compose больше не трогается вовсе.
+  - **Edge-топология (решение 2):** `Dockerfile.edge` + `nginx.conf`
+    упраздняют web-образ — единственный nginx полного сайта: :80 —
+    редирект на HTTPS + ACME-challenge + exact-match health-маршрут,
+    :443 — TLS с хостовыми сертификатами; `/` → статика SPA,
+    `/images/public/` → публичное поддерево медиа-тома, `/admin` →
+    admin, `/api` → backend — без переписывания путей; HSTS;
+    drift-гард конфигов в `verify-edge.sh`; для смоука —
+    `deploy/nginx.smoke.conf` (TLS-off). compose публикует только edge
+    (80/443); закреплённая подсеть + статический IP edge `172.16.0.10`
+    = `FORWARDED_ALLOW_IPS` (синхронно в ARG `Dockerfile.backend`);
+    loopback-порты сняты; health деплоя — через edge с хоста.
+  - **Единый медиа-том (решение 3):** `/opt/memo/media` — edge
+    монтирует только `public/` read-only и отдаёт по `/images/`;
+    backend монтирует корень read-write (`FILES_DIR`, загрузки в
+    `avatars/`); граница публичности — уровнем монтирования, прежняя
+    схема раздельных томов упразднена.
+  - **Качество по ревью:** charset-валидация тега/префикса реестра,
+    `REGISTRY_TOKEN` по stdin (не в argv), preflight
+    certs/acme/media-public, бэкап env рядом с целью + abort на
+    stale-бэкапе, TELEGRAM-секреты по контракту Settings.
+  - Tests (rework): render-env **48/48**, deploy.sh dryrun **52/52**,
+    verify-edge **6/6**; actionlint + shellcheck чисто; prod-smoke —
+    сценарии 2/3/4 **exit 0** (inode/WAL/401, алиас `/images/`
+    positive+negative); ревью compliance + quality зелёные
+    (digest-пиннинг базовых образов — отложено).
+  - Нерешённое: прогон PR CI («Prod build smoke» + полный CI на
+    PR #629) — гейт manager; операторские шаги #574/#617/#619
+    актуальны, ранбук #619 проще — env рендерится деплоем сам;
+    секреты/переменные репозитория `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/
+    `DEPLOY_SSH_KEY`, опционально `REGISTRY_TOKEN` и
+    `vars.REGISTRY_PREFIX`.
+  - Status: `docs/status/2026-11-22-prod-deploy-616.md`
 - **GH #612 — Предзагрузка прода: загрузчик читает CSV владельца
   напрямую (`--csv`), YAML-вход упразднён, CSV-шаблон-инструкция
   в репо** — branch `612-prod-seed-csv-loader` (5 задач, 7 коммитов

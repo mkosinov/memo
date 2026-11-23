@@ -3,8 +3,24 @@ import type { DependencyNode } from './schemas';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:8000` : 'http://localhost:8000');
 
+/**
+ * Resolve an API route against the active base (GH #616).
+ *
+ * A RELATIVE base (production bake: NEXT_PUBLIC_API_URL='/api') is the
+ * same-origin mount point: the host nginx (#617) proxies '/api' to the
+ * backend WITHOUT path rewriting, and backend routes already live under
+ * '/api/v1/…' — so a path carrying the base prefix must keep it exactly
+ * once, never doubled. Absolute bases (dev fallback, e2e pins) keep plain
+ * concatenation, with a trailing base slash tolerated.
+ */
+export function resolveApiUrl(base: string, path: string): string {
+  const b = base.replace(/\/+$/, '');
+  if (b !== '' && (path === b || path.startsWith(`${b}/`))) return path;
+  return `${b}${path.startsWith('/') || b === '' ? '' : '/'}${path}`;
+}
+
 /** SSE endpoint (GH #239 spec §4.2) — consumed via EventSource by the admin app. */
-export const eventsUrl = `${API_BASE}/api/v1/events`;
+export const eventsUrl = resolveApiUrl(API_BASE, '/api/v1/events');
 
 // Per-tab identity (GH #239 spec §2.4/§4.2): one uuid per browser tab
 // (regenerated on reload) — the admin compares it against event.origin to
@@ -66,7 +82,7 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   // Mutating requests only (spec §3.3): GETs never announce tab identity.
   if (method !== undefined && method !== 'GET') headers['X-Memo-Tab-Id'] = tabId;
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(resolveApiUrl(API_BASE, path), {
     ...options,
     headers,
     // Cookie sessions (GH #247 spec §4.1): the session cookies

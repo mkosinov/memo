@@ -1,5 +1,6 @@
 """Alembic environment configuration for async SQLAlchemy + SQLite."""
 
+import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -50,6 +51,45 @@ config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+
+def _apply_env_database_url(alembic_config: Any) -> None:
+    """GH #616 — honor the ``DATABASE_URL`` env var (the same var the app
+    engine uses, ``src.core.config.settings.DATABASE_URL``).
+
+    The container path (deploy.sh's ``docker compose run --rm backend
+    alembic upgrade head``, the prod-build CI smoke) gets DATABASE_URL
+    injected by the service ``env_file``; without this override alembic
+    would migrate the ephemeral in-container ``memo.db`` hardcoded in
+    alembic.ini instead of the volume-mounted prod DB, and prod would
+    boot unmigrated.
+
+    Precedence: an explicit programmatic
+    ``set_main_option("sqlalchemy.url", ...)`` (``src/db/migrate.py``,
+    the migration tests' ``_cfg`` helpers) ALWAYS wins — the env var
+    replaces only the untouched alembic.ini default. That guard is
+    load-bearing: ``tests/conftest.py`` exports DATABASE_URL for the
+    whole pytest session while the migration tests point their own
+    temp-file URLs via ``set_main_option``.
+
+    The async driver form (``sqlite+aiosqlite://`` — how prod env files
+    spell it) is normalized to the sync form the same way as
+    ``src/db/migrate.py``; with no env var the behavior is exactly
+    today's (the alembic.ini default), so dev workflows are untouched.
+    """
+    env_url = os.environ.get("DATABASE_URL")
+    if not env_url or alembic_config.config_file_name is None:
+        return
+    ini_default = alembic_config.get_main_option("sqlalchemy.url")
+    pristine_ini = type(alembic_config)(alembic_config.config_file_name)
+    if ini_default != pristine_ini.get_main_option("sqlalchemy.url"):
+        return  # the caller chose a URL explicitly — keep it
+    alembic_config.set_main_option(
+        "sqlalchemy.url", env_url.replace("+aiosqlite", "")
+    )
+
+
+_apply_env_database_url(config)
 
 target_metadata = Base.metadata
 

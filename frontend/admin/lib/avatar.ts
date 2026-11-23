@@ -1,3 +1,5 @@
+import { resolveApiUrl } from '@memo/api-client';
+
 /**
  * Avatar URL derivation for next/image (GH #301 T3).
  *
@@ -11,6 +13,10 @@
  * browser and the server-side optimizer reach the backend. Already-absolute
  * URLs (free-form admin-entered «Аватар URL» hosts, data:/protocol-relative
  * schemes) pass through unchanged.
+ *
+ * GH #616: a RELATIVE base (`/api`, prod bake) is resolved by the shared
+ * `resolveApiUrl` — the served path already carries the '/api' prefix and
+ * stays same-origin, undoubled (valid src for `images.unoptimized`).
  */
 
 /** True for anything that is already its own origin: `scheme:…` or `//host`.
@@ -32,5 +38,5 @@ function apiBase(): string {
 /** Absolutize a served avatar path for next/image; absolute srcs pass through. */
 export function toAvatarSrc(url: string): string {
   if (isAbsoluteUrl(url)) return url;
-  return `${apiBase().replace(/\/+$/, '')}${url.startsWith('/') ? '' : '/'}${url}`;
+  return resolveApiUrl(apiBase(), url);
 }

@@ -254,7 +254,9 @@ def create_app() -> FastAPI:
         }
         return mapping.get(status_code, ErrorCode.INTERNAL_ERROR.value)
 
-    if settings.ENV != "testing":
+    # GH #616 §3.4 — explicit opt-in flag (deny-by-default), NOT the old
+    # ``ENV != "testing"`` inversion: an unset variable must mean OFF.
+    if settings.SQLADMIN_ENABLED:
         setup_admin(app)
 
     # API v1

@@ -19,7 +19,10 @@ const mockUpdateMyStaffProfile = vi.fn();
 const mockUploadAvatar = vi.fn();
 const mockRefresh = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@memo/api-client', () => ({
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return {
+  ...actual,
   getMyStaffProfile: (...args: unknown[]) => mockGetMyStaffProfile(...args),
   updateMyStaffProfile: (...args: unknown[]) => mockUpdateMyStaffProfile(...args),
   uploadAvatar: (...args: unknown[]) => mockUploadAvatar(...args),
@@ -32,7 +35,8 @@ vi.mock('@memo/api-client', () => ({
       this.code = code;
     }
   },
-}));
+  };
+});
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ refresh: mockRefresh, branch: 'master' as const }),

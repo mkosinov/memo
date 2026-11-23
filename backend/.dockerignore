@@ -1,0 +1,15 @@
+# Context-scoped ignore for the backend image build
+# (docker build -f deploy/Dockerfile.backend backend/). Only what the image
+# needs ships: src/, alembic/, alembic.ini, seed-data/, pyproject.toml, uv.lock.
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests
+scripts
+memo_backend.egg-info
+memo.db*
+files
+.env*

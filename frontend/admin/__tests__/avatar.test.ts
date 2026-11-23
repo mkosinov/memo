@@ -63,4 +63,15 @@ describe('toAvatarSrc', () => {
       'http://127.0.0.1:8010/api/v1/files/avatar/z.png',
     );
   });
+
+  // GH #616: prod builds bake a RELATIVE base — the API is mounted
+  // same-origin behind nginx (#617 proxies '/api' without rewriting), so
+  // the served avatar path already carries the '/api' prefix and must
+  // reach next/image undoubled (same-origin src, valid with unoptimized).
+  it('returns the served path as-is when the base is relative /api (GH #616)', () => {
+    process.env.NEXT_PUBLIC_API_URL = '/api';
+    expect(toAvatarSrc('/api/v1/files/avatar/rel.png')).toBe(
+      '/api/v1/files/avatar/rel.png',
+    );
+  });
 });

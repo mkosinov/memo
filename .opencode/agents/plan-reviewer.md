@@ -1,7 +1,7 @@
 ---
 description: Plan reviewer. Verifies that a plan faithfully and completely expands the approved spec BEFORE any code is written (gate C, DESIGN phase).
 mode: all
-model: opencode/glm-5.3-flash-free
+model: opencode/big-pickle
 temperature: 0.1
 permission:
   read: allow

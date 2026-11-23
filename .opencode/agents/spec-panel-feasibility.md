@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — feasibility perspective. Finds technical risks, hidden complexity, and unrealistic assumptions in spec documents.
 mode: all
-model: opencode/glm-5.3-flash-free
+model: opencode/beam-free
 temperature: 0.1
 permission:
   read: allow

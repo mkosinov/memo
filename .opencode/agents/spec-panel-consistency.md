@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — consistency perspective. Finds contradictions within the spec and conflicts with existing code, domain rules, and conventions.
 mode: all
-model: opencode/glm-5.3-flash-free
+model: opencode/iceman-free
 temperature: 0.1
 permission:
   read: allow

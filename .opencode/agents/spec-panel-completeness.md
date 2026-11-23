@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — completeness perspective. Finds holes, unhandled edge cases, and missing scenarios in spec documents.
 mode: all
-model: opencode/glm-5.3-flash-free
+model: opencode/nemotron-3.5-lightning-free
 temperature: 0.1
 permission:
   read: allow

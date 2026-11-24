@@ -1,8 +1,8 @@
 ---
 description: Workflow manager. Single entry point. Brainstorming with the user, human gates, scratchpad owner, phase dispatch to @architect, FasTP direct dispatch to coders.
 mode: primary
-model: opencode/glm-5.3-flash-free
-variant: max
+model: zai/glm-5.4
+variant: high
 temperature: 0.3
 permission:
   read:

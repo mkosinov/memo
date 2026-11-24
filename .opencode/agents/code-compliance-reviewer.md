@@ -1,7 +1,7 @@
 ---
 description: Code compliance reviewer. Verifies that the implementer built exactly what was requested — nothing more, nothing less (G5: code vs plan/task).
 mode: subagent
-model: opencode/deepseek-v4.1-flash-free
+model: zai/glm-5.3-flash
 temperature: 0.1
 permission:
   read: allow

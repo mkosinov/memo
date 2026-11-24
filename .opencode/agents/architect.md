@@ -1,8 +1,8 @@
 ---
 description: Phase executor. Runs DESIGN (spec+plan+review+worktree) or IMPL (dev-loop, docs, finishing) phases dispatched by @manager. Never talks to the user directly.
 mode: all
-model: opencode/glm-5.3-flash-free
-variant: max
+model: zai/glm-5.4
+variant: high
 temperature: 0.2
 permission:
   read: allow

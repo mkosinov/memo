@@ -685,6 +685,25 @@ describe("BookingActivityOverlay — booking refusal and retry (US-3)", () => {
     expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
   });
 
+  it("localizes a 404 ACTIVITY_NOT_FOUND refusal — «Занятие не найдено», no English server text (#538)", async () => {
+    mockedCreateMyRecord.mockRejectedValue(
+      new ApiError(404, "Activity not found", "ACTIVITY_NOT_FOUND"),
+    );
+
+    const errorBlock = await submitExpectingRefusal();
+    expect(errorBlock).toHaveTextContent("Занятие не найдено");
+    expect(errorBlock).not.toHaveTextContent("Activity not found");
+  });
+
+  it("shows the Russian server text as-is for a 409 ACTIVITY_AT_CAPACITY refusal — pass-through, no numbers (#538)", async () => {
+    mockedCreateMyRecord.mockRejectedValue(
+      new ApiError(409, "Недостаточно мест", "ACTIVITY_AT_CAPACITY"),
+    );
+
+    const errorBlock = await submitExpectingRefusal();
+    expect(errorBlock).toHaveTextContent("Недостаточно мест");
+  });
+
   it("clears the stale booking-error on overlay reopen — no leaked block, no dead retry", async () => {
     // The verify in this flow establishes the session: the first session check
     // is anonymous, every later one (post-verify refresh, reopen) is authenticated.

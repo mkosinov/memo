@@ -69,3 +69,12 @@ One message in the user's language: a table role → current model (alive / dead
 
 1. `--model opencode/<suspect>` → alive: transient failure; follow the panel availability policy (one rerun of that agent), report.
 2. Dead or failed → find the roles riding it (mapping above) → §Proposal scoped to those roles, stop for OK. Meanwhile mark the agent `skipped` per the availability policy so the design phase is not blocked.
+
+## Session hygiene — the watch session must stay lightweight
+
+Automation fires land in the session where the automation was CREATED (verified 2026-11-24), so the bound session is re-read in full on every daily run. Keep it cheap:
+
+- This skill carries the whole protocol — nothing else needs to live in the watch session. A daily run = script + one line; do not accumulate design discussions, remap dialogues, or reports in it.
+- When the bound session has grown (long proposal dialogues, absorbed work, or the session was created from a heavy conversation): **re-anchor** — from a FRESH lightweight session, delete the old automation (`CronDelete`, it is «Проверка free-моделей opencode — ежедневно в 6:00») and create a new one (same 06:00 cron, prompt = the pointer text below), so the fires bind to the fresh session. Re-anchoring is lossless: this skill is the single source of the protocol.
+- The current automation prompt text (pointer, keep verbatim): «Ты — наблюдатель free-моделей opencode, на которых работают панельные ревьюеры memo (spec-panel-* и plan-reviewer). Один запуск = один цикл проверки, затем конец хода. Протокол — целиком в скилле .zcode/skills/zen-model-watch/SKILL.md: прочитай его первым действием и работай строго по нему. Этот текст — только указатель, собственных правил он не добавляет; при изменении протокола правится скилл, не здесь. Пользователь обычно отсутствует: без изменений в списке моделей — одна строка отчёта и конец хода; при изменениях — разбор и предложение новой связки одним сообщением, затем конец хода (ответ пользователя продолжит цикл в этой же сессии). Если файл скилла недоступен — сообщи об этом и закончи ход.»
+- Same pathology applies to any long-lived automation (the auto-DESIGN watcher re-reads its session every 2 h) — re-anchor those the same way when they grow.

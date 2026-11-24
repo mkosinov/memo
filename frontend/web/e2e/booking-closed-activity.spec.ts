@@ -52,7 +52,7 @@ test.describe('#551 US-1 web — запись на закрытое заняти
       // capacity guard must refuse it (occupied + 1 > 0).
       const refused = page.waitForResponse(
         (r) =>
-          r.url().includes('/api/v1/my/records') && r.request().method() === 'POST',
+          r.url().includes('/api/v1/my/client/records') && r.request().method() === 'POST',
       );
       await panel.getByRole('button', { name: 'Записаться' }).click();
       const resp = await refused;

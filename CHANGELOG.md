@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-11-25
+
+### Added
+- **GH #538 — Локализация booking-error по кодам ошибок (polish, web)** —
+  branch `538-web-booking-error-l10n` (3 задачи, 5 коммитов
+  `8aef9738..626bb306`, base `a19db0f2` = origin/main на момент форка;
+  7 файлов, +364/−14; спека
+  `docs/specs/2026-10-25-web-booking-error-l10n-design.md` рев.2 — на
+  main, рев.3 — правкой на ветке (`626bb306`, G4.5 override); план
+  `docs/plans/2026-11-24-web-booking-error-l10n-538-plan.md` 3/3 — на
+  main, unchanged by IMPL): блок отказа брони в web показывает русский
+  текст по коду ошибки — словарь `CODE_MESSAGES` в
+  `frontend/web/app/lib/errors.ts` (`ACTIVITY_NOT_FOUND` → «Занятие
+  не найдено», `TARIFF_REQUIRED` → «Выберите тариф для каждого места»,
+  `TARIFF_NOT_FOUND` → «Тариф не найден») + один промежуточный шаг в
+  `structuredServerMessage`; коды вне словаря fall through к
+  серверному тексту — 409 `ACTIVITY_AT_CAPACITY` → «Недостаточно мест»
+  уже русский с #551, записи в словаре нет (вариант А Gate B).
+  - TDD (T1 `8aef9738`): RED-на-main булавка утечки английского 404
+    в `BookingOverlay.test.tsx` + парная булавка 409 pass-through.
+  - Словарь + юниты (T2 `1fb9ad0b`): покрытие расширено в
+    `errors.test.ts`.
+  - E2E (T3 `eb65a1cf`): web `booking-error-l10n.spec.ts` — US-1 409
+    «Недостаточно мест» через реальный провод (сид-занятие capacity=1
+    из фикстуры `seed-individual-activity.ts`), US-2 404 «Занятие не
+    найдено» (удаление занятия sqlite-exec между открытием формы и
+    сабмитом); `6d622bf2` — попутный тест-хил устаревшего wait-URL в
+    `booking-closed-activity.spec.ts` (последствие #584; web-e2e не в
+    CI — слепая зона).
+  - Спека рев.3 (`626bb306`): по решению владельца VC-хинт
+    «Индивидуальный МК» (сид-алиас, никогда не рендерится) заменён
+    статически рендерящимся заголовком карточки «Индивидуальный
+    мастер-класс»; поведенческие секции не тронуты.
+  - Tests: web vitest **578/578**, `tsc --noEmit` чист; web-e2e на
+    self-managed стеке — `booking-error-l10n` **2/2**,
+    `booking-callcheck` **2/2**, `booking-closed-activity` **1/1**;
+    visual gate exit 0 (1 машинная проверка, 3 manual review).
+    US-3/US-4 — без e2e по спеке (недостижимы через UI), US-5 покрыт
+    существующими компонентными тестами.
+  - Status: `docs/status/2026-11-25-web-booking-error-l10n-538.md`
+
 ## [Unreleased] — 2026-11-22
 
 ### Added

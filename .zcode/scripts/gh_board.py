@@ -223,6 +223,11 @@ def load_status_field():
 
 
 def items_with_fields() -> list[dict]:
+    # Import-safe on purpose: impl_janitor.py calls this directly, with no CLI
+    # command to load the config first. Without this line PROJECT_ID stayed
+    # None, the query went out as node(id: "None") and the janitor skipped
+    # every pass for 16 days (2026-11-08..24) — unnoticed, it exited 0.
+    load_config()
     out = []
     cursor = ""
     while True:

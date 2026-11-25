@@ -27,6 +27,10 @@ JANITOR_MIN_INTERVAL_S (default 1h) via a lastrun stamp. Worktree kills are
 logged to the issue's "auto-impl log:" comment; TUI kills go to the watcher
 log only.
 
+Exit codes: 0 — pass done (or throttled); non-zero — the pass was skipped
+or crashed. A skipped pass is never silent: the watcher reports it (as rc=0
+the skips of 2026-11-08..24 went unnoticed for 16 days).
+
 Usage: impl_janitor.py [--dry-run]
 """
 import os
@@ -142,8 +146,10 @@ def main() -> None:
             if it["state"] == "OPEN" and (it["status"] or "").lower() in ACTIVE_STATUSES:
                 active_numbers.add(it["number"])
     except SystemExit as e:
+        # A skipped pass is a failure, not a quiet no-op: exit non-zero so the
+        # watcher reports it. The reason goes on the line above.
         log_line(f"board lookup failed ({e}) — pass skipped")
-        return
+        sys.exit(1)
 
     ps = procs()
 

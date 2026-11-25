@@ -20,7 +20,8 @@ Usage (from repo root):
 Project identity (project/field node ids, owner, repo, per-host budgets)
 lives in docs/board/board_config.json (format v1), loaded and validated by
 load_config() before any board read or mutation — a missing or broken config
-fails loudly instead of falling back to hardcoded ids.
+fails loudly instead of falling back to hardcoded ids, and a GraphQL request
+issued before load_config() is refused by name as well (gql() guard).
 Card ownership lives in the single-select field "host" (options: imac,
 macbook, hk, gcp — created manually 2026-09-20): claiming is a field write
 and the race tiebreak re-reads the field. This replaced the CLAIM-comment
@@ -120,7 +121,21 @@ _gate_field_id = None
 _gate_field_opts = None
 
 
+def _require_identity() -> None:
+    """Refuse a request issued before load_config(). Every call here addresses
+    the board project or its repository; an identity that was never loaded
+    must fail by name instead of going out as node(id: "None") — GitHub's
+    answer to that is opaque, and the janitor read it on every pass for 16
+    days (2026-11-08..24)."""
+    missing = [name for name, value in (("project_id", PROJECT_ID), ("owner", OWNER), ("repo", REPO))
+               if value is None]
+    if missing:
+        sys.exit(f"board identity not loaded ({', '.join(missing)}) — "
+                 "call load_config() before any board request")
+
+
 def gql(query: str) -> dict:
+    _require_identity()
     r = subprocess.run(
         ["gh", "api", "graphql", "-f", f"query={query}"],
         capture_output=True, text=True,

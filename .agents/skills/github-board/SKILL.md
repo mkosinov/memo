@@ -57,7 +57,7 @@ An issue is automatically added to the board on the first set/status call if it 
 
 ## Fast-track (docs-only, not a command)
 
-An issue whose diff touches only docs/prose may skip the container IMPL session entirely; a diff touching anything executable — `scripts/`, `.github/workflows/`, agent or skill bodies, site build — disqualifies fast-track and forces the normal plan-reviewed path (the watcher auto-pulls main every cycle and executes harness files from it, so a fast-tracked merge must never carry executable changes that skipped plan review). Flow: the card goes `In Design` → `In IMPL` while the change PR is open → `In-main` on merge — it never sits in `Ready to IMPL`; the spec carries `## Verification` instead of a plan. Full protocol: design-phase §2. The `merged` scratchpad line is container-side; the host records nothing.
+An issue whose diff touches only docs/prose may skip the container IMPL session entirely; a diff touching anything executable — `scripts/`, `.github/workflows/`, agent or skill bodies, site build — disqualifies fast-track and forces the normal plan-reviewed path (the watcher auto-pulls main every cycle and executes harness files from it, so a fast-tracked merge must never carry executable changes that skipped plan review). Flow: the card goes `In Design` → `PR (G7)` while the change PR is open → `In-main` on merge — it never sits in `Ready to IMPL` or `In IMPL` (an `In IMPL` card without a live container session reads as a dead run to the watcher's reconcile, which returns it to `Ready to IMPL` with a BLOCKED entry); the spec carries `## Verification` instead of a plan. Full protocol: design-phase §2. The `merged` scratchpad line is container-side; the host records nothing.
 
 ## Workflow touchpoints
 

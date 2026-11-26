@@ -77,8 +77,8 @@ checks) instead of a plan artifact. If a plan turns out to be needed (a
 fast-track and is reclassified as a normal design: plan + Gate C →
 `Ready to IMPL` → container IMPL (user decision 2026-10-07 — no plan inside
 fast-track). The host session implements right after the gates; the spec
-lands in the change PR; the card goes `In IMPL` while the PR is open →
-`In-main` on merge and never sits in `Ready to IMPL`; `Closes #N` belongs
+lands in the change PR; the card goes `PR (G7)` while the PR is open →
+`In-main` on merge and never sits in `Ready to IMPL` or `In IMPL`; `Closes #N` belongs
 in the PR description only; no handoff message. Full details:
 superagents canon `docs/workflow/design-phase.md` §Fast-track (v3.10).
 

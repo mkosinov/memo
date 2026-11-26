@@ -11,6 +11,7 @@ Non-obvious conventions a fresh session must know. Keep short; details live in t
 ## Harness seam
 
 - Board management only via `.zcode/scripts/gh_board.py` (identical copy ships in `.opencode/scripts/`; change both or edit one and copy over). Every new issue gets its board card in the same breath: `python3 .zcode/scripts/gh_board.py status N "Backlog"` right after `gh issue create` — the board mirrors ALL open issues; containers (issues with sub-issues) get Hold instead. The reconcile mirror sweep is the safety net, not a license to skip.
+- On the "Memo Project" board GitHub's built-in "Auto-close issue" workflow is ON: moving an OPEN issue's card to `In-main` closes the issue. Never park an issue that must stay open in `In-main` — keep it in its working status.
 - Codex repo setup: this root `AGENTS.md` is the durable instruction file; project settings and custom agent roles live in `.codex/config.toml`, and Codex skills live in `.agents/skills/<name>/SKILL.md`.
 - Harness files (skills, agents, scripts) are English; specs, plans, and domain rules are Russian.
 - Design pipeline protocol: `.zcode/skills/auto-design/SKILL.md` (watcher) and `.zcode/skills/design-phase/SKILL.md` (host DESIGN phase); container merge/finish flow: `.opencode/skills/finishing-a-development-branch/SKILL.md`.

@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-11-27
+
+### Added
+- **GH #574 — VPS-хостинг прода (Selectel): редирект не-канонов, ежечасная
+  проба доступности, скрипт провижинирования хоста** — branch
+  `574-hosting-provider-prod-vps` (4 задачи: 1–3 код, 4 — ручной этап
+  владельца ПОСЛЕ мержа; 3 коммита `9556fc48..ded51044`, base
+  `b2d7a927` = main на момент старта IMPL; 4 файла, +1132/−0; спека
+  `docs/specs/2026-11-27-hosting-provider-574-design.md` рев.2 и план
+  `docs/plans/2026-11-27-hosting-provider-574-plan.md` — оба на main,
+  unchanged by IMPL; инфраструктурная фича — пользовательского поведения
+  в коде нет): edge — не-канонические хосты (`www.colourmountains.ru`,
+  punycode `xn--b1acfa3biol7a6ce.xn--p1ai`) получают 301 на канон
+  `colourmountains.ru` с сохранением пути и query (`map $host` +
+  server-level `if` в существующем 443-server; без новых
+  location/server-блоков, port 80 и HSTS не тронуты; куки на не-канонах
+  не ставятся — редирект до приложения) (`9556fc48`);
+  `.github/workflows/uptime.yml` — ежечасная внешняя проба (cron
+  `5 * * * *` + `workflow_dispatch`)
+  `https://colourmountains.ru/api/v1/health` одним curl-шагом с
+  `permissions: contents: read` (раннеры вне РФ — доступность не зависит
+  от белых списков; красный ежечасно до go-live — принято планом)
+  (`9140d337`); `deploy/provision-vps.sh` + hermetic dry-run сьют
+  `provision-vps.sh.test.sh` (PATH-шимы, не в CI — как сиблинги
+  `deploy/*.test.sh`): CLI `--user/--pubkey/--email`, preflight
+  root+Ubuntu, восемь идемпотентных блоков с печатью следующего ручного
+  шага, env-швы `PROVISION_ETC_ROOT/OPT_ROOT/SWAPFILE`; lock-out guard —
+  ≥1 authorized key до sshd-харденинга, sudoers через `visudo -cf` до
+  установки, passwordless sudo для key-only deploy-пользователя;
+  DNS-гейт — блок 7 отказывает в выпуске сертификата с exit 10, пока
+  три имени (канон, www, punycode) не резолвятся (план ставит DNS после
+  первого прогона); certbot deploy-hook сам обновляет
+  бинд-маунт-копию `/opt/memo/certs` (dereference + атомарная замена)
+  перед `nginx -t && nginx -s reload` в edge; `/opt/memo/deploy` под
+  deploy-пользователя для scp из GitHub Actions (`ded51044`).
+  Tests: T1 — dockerized probe P1–P5 green (301 с точным `Location`
+  path+query, без `Set-Cookie`; канон не редиректится) +
+  `deploy/verify-edge.sh` **6/6**; T2 — js-yaml валидатор **18/18** +
+  behavioral-стаб (200 → exit 0, 404 → exit 22); T3 —
+  `provision-vps.sh.test.sh` **PASS 94 / FAIL 0**, `bash -n` и
+  shellcheck чисто; ревью compliance ✅ ×3 + quality ✅ (5
+  неблокирующих); visual gate N/A → exit 0. Task 4 (VM Selectel
+  2 vCPU/2 ГБ/30 ГБ Ubuntu 24.04, проверка IP под белые списки, DNS
+  A-записи `@`/`www`/punycode, GitHub-секреты, еженедельные снапшоты,
+  релизный деплой, 5 приёмочных сценариев +
+  `certbot renew --dry-run --run-deploy-hooks`) — ручной этап владельца
+  + сеанса после мержа. Status:
+  `docs/status/2026-11-27-hosting-provider-574.md`
+
 ## [Unreleased] — 2026-11-25
 
 ### Added

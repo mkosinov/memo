@@ -1,0 +1,30 @@
+# Uptime probe (GH #574, spec decision 7 — minimal monitoring floor): hourly
+# external check of the production health endpoint, run from GitHub-hosted
+# runners (outside Russia — availability does not depend on mobile
+# whitelisting regimes). A failed probe turns the run red and GitHub
+# notifies the repo owner by email — that is the whole alerting path.
+
+name: Uptime probe
+
+on:
+  schedule:
+    # Hourly at minute 5; GitHub Actions cron is UTC.
+    - cron: "5 * * * *"
+  workflow_dispatch: {}
+
+# Least privilege: the probe only runs curl, nothing else.
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    # Until go-live (planned 2026-12-01) every run is expected red: the
+    # production endpoint does not exist yet. This is the accepted state,
+    # not a breakage signal.
+    name: Health probe (colourmountains.ru)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Single production domain, hardcoded on purpose — no variable needed.
+      - name: Probe production health endpoint
+        run: curl -fsS --max-time 30 https://colourmountains.ru/api/v1/health
